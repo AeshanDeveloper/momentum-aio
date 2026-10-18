@@ -88,8 +88,6 @@ class Plugin(BasePlugin):
                 owner_only=bool(getattr(mod, "owner_only", False)),
                 guild_only=bool(getattr(mod, "guild_only", False)),
                 nsfw=bool(getattr(mod, "nsfw", False)),
-                sub_commands=getattr(mod, "sub_commands", getattr(mod, "subcommands", [])),
-                builder=getattr(mod, "builder", None),
                 plugin_id=self.plugin_id
             )
             commands_registry.register(cmd)

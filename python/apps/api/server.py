@@ -60,7 +60,6 @@ class ApiServer:
         # Catch-all middleware/handlers for Auth & Tickets
         self.app.router.add_route("*", "/api/tickets{tail:.*}", self._handle_tickets_proxy)
         self.app.router.add_route("*", "/api/auth/{tail:.*}", self._handle_auth_proxy)
-        self.app.router.add_route("*", "/auth/callback{tail:.*}", self._handle_auth_proxy)
 
         # Static assets if public directory exists
         if os.path.isdir(self.public_dir):

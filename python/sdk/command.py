@@ -23,8 +23,6 @@ class Command:
         enabled: bool = True,
         hidden: bool = False,
         subcommands: Optional[List[Dict[str, Any]]] = None,
-        sub_commands: Optional[List[Dict[str, Any]]] = None,
-        builder: Optional[Any] = None,
         plugin_id: Optional[str] = None
     ):
         self.name = name.lower()
@@ -45,19 +43,8 @@ class Command:
         self.status = status
         self.enabled = enabled
         self.hidden = hidden
-        self.sub_commands = sub_commands or subcommands or []
-        self.subcommands = self.sub_commands
-        self.subCommands = self.sub_commands
-        self.builder = builder
+        self.subcommands = subcommands or []
         self.plugin_id = plugin_id
-
-        # TypeScript-parity aliases
-        self.type = self.command_type
-        self.command = self
-        self.raw = self
-        self.userPermissions = self.user_permissions
-        self.botPermissions = self.bot_permissions
-        self.ownerOnly = self.owner_only
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -77,6 +64,5 @@ class Command:
             "status": self.status,
             "enabled": self.enabled,
             "hidden": self.hidden,
-            "sub_commands": self.sub_commands,
             "pluginId": self.plugin_id
         }

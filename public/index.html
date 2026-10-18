@@ -621,6 +621,83 @@
       }
     }
 
+    async function initAuth() {
+      try {
+        const sessRes = await request("/api/auth/session").catch(() => ({ authenticated: false }));
+        if (sessRes && sessRes.authenticated && sessRes.session) {
+          const user = sessRes.session.user;
+          if ($("discordLoginBtn")) $("discordLoginBtn").style.display = "none";
+          if ($("authNoticeBanner")) $("authNoticeBanner").style.display = "none";
+          if ($("userProfileBadge")) $("userProfileBadge").style.display = "flex";
+          if ($("userName")) $("userName").textContent = user.global_name || user.username;
+          if (user.avatar && $("userAvatar")) {
+            $("userAvatar").src = user.avatar.startsWith("http") ? user.avatar : `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`;
+            $("userAvatar").style.display = "inline-block";
+          }
+        } else {
+          if ($("discordLoginBtn")) $("discordLoginBtn").style.display = "inline-flex";
+          if ($("authNoticeBanner")) $("authNoticeBanner").style.display = "flex";
+          if ($("userProfileBadge")) $("userProfileBadge").style.display = "none";
+        }
+
+        // Populate guilds
+        const guildsRes = await request("/api/auth/guilds").catch(() => ({ guilds: [] }));
+        const select = $("globalServerSelect");
+        if (select) {
+          select.innerHTML = "";
+          const guilds = guildsRes.guilds || [];
+          if (guilds.length === 0) {
+            select.innerHTML = "<option value='default'>Global / Cluster</option>";
+          } else {
+            guilds.forEach(g => {
+              const opt = document.createElement("option");
+              opt.value = g.id;
+              opt.textContent = `${g.name} (${g.memberCount || 0})`;
+              select.appendChild(opt);
+            });
+          }
+        }
+
+        if ($("bannerDemoBtn")) {
+          $("bannerDemoBtn").onclick = async () => {
+            try {
+              await fetch("/api/auth/demo", { method: "POST" });
+              await initAuth();
+              load();
+            } catch (err) {
+              console.error("Demo login error:", err);
+            }
+          };
+        }
+
+        if ($("discordLoginBtn")) {
+          $("discordLoginBtn").onclick = () => {
+            if ($("bannerDemoBtn")) $("bannerDemoBtn").click();
+          };
+        }
+
+        if ($("bannerLoginBtn")) {
+          $("bannerLoginBtn").onclick = () => {
+            if ($("bannerDemoBtn")) $("bannerDemoBtn").click();
+          };
+        }
+
+        if ($("logoutBtn")) {
+          $("logoutBtn").onclick = async () => {
+            try {
+              await fetch("/api/auth/logout", { method: "POST" });
+              await initAuth();
+              load();
+            } catch (err) {
+              console.error("Logout error:", err);
+            }
+          };
+        }
+      } catch (err) {
+        console.error("initAuth error:", err);
+      }
+    }
+
     $("refresh").onclick = () => {
       load();
 
@@ -657,141 +734,6 @@
         if (view === "registry") registry();
         if (view === "audit") loadAuditLogsView();
       };
-    });
-
-    async function initAuth() {
-      try {
-        const sessionRes = await request("/api/auth/session").catch(() => ({ authenticated: false }));
-        if (sessionRes && sessionRes.authenticated && sessionRes.session) {
-          currentUser = sessionRes.session.user || sessionRes.user;
-          const sessionId = sessionRes.session.id;
-          if (sessionId) {
-            localStorage.setItem("m1_session_id", sessionId);
-          }
-          if ($("discordLoginBtn")) $("discordLoginBtn").style.display = "none";
-          if ($("userProfileBadge")) {
-            $("userProfileBadge").style.display = "flex";
-            if ($("userName")) $("userName").textContent = currentUser.global_name || currentUser.username || "Administrator";
-            if (currentUser.avatar && $("userAvatar")) {
-              $("userAvatar").src = `https://cdn.discordapp.com/avatars/${currentUser.id}/${currentUser.avatar}.png`;
-              $("userAvatar").style.display = "inline-block";
-            }
-          }
-          if ($("authNoticeBanner")) {
-            if ($("authBannerTitle")) $("authBannerTitle").textContent = "Authenticated as Administrator";
-            if ($("authBannerSubtitle")) $("authBannerSubtitle").textContent = `Connected as ${currentUser.username || "Admin"}. Multi-server control active.`;
-            if ($("bannerLoginBtn")) $("bannerLoginBtn").style.display = "none";
-            if ($("bannerDemoBtn")) $("bannerDemoBtn").style.display = "none";
-          }
-        } else {
-          currentUser = null;
-          if ($("discordLoginBtn")) $("discordLoginBtn").style.display = "flex";
-          if ($("userProfileBadge")) $("userProfileBadge").style.display = "none";
-          if ($("authNoticeBanner")) {
-            if ($("authBannerTitle")) $("authBannerTitle").textContent = "Discord Multi-Server Mode Active";
-            if ($("authBannerSubtitle")) $("authBannerSubtitle").textContent = "Authenticate with Discord to manage all servers where you hold Administrator permissions and configure operational settings.";
-            if ($("bannerLoginBtn")) $("bannerLoginBtn").style.display = "inline-block";
-            if ($("bannerDemoBtn")) $("bannerDemoBtn").style.display = "inline-block";
-          }
-        }
-
-        // Fetch accessible guilds
-        const guildsRes = await request("/api/auth/guilds").catch(() => ({ guilds: [] }));
-        accessibleGuilds = guildsRes.guilds || [];
-        const select = $("globalServerSelect");
-        if (select) {
-          select.innerHTML = "";
-          if (accessibleGuilds.length === 0) {
-            select.innerHTML = `<option value="default">Default Server</option>`;
-          } else {
-            accessibleGuilds.forEach(g => {
-              const opt = document.createElement("option");
-              opt.value = g.id;
-              opt.textContent = g.name + (g.botPresent ? "" : " (Add Bot)");
-              select.appendChild(opt);
-            });
-            if (selectedGuildId && accessibleGuilds.some(g => g.id === selectedGuildId)) {
-              select.value = selectedGuildId;
-            } else {
-              selectedGuildId = accessibleGuilds[0].id;
-              select.value = selectedGuildId;
-            }
-          }
-          updateGuildInviteLink();
-        }
-      } catch (err) {
-        console.warn("[Auth] Failed to initialize auth state:", err);
-      }
-    }
-
-    function updateGuildInviteLink() {
-      const select = $("globalServerSelect");
-      const inviteLink = $("inviteBotLink");
-      if (!select || !inviteLink) return;
-      const current = accessibleGuilds.find(g => g.id === select.value);
-      if (current && current.inviteUrl) {
-        inviteLink.href = current.inviteUrl;
-        inviteLink.style.display = "inline-block";
-      } else {
-        inviteLink.style.display = "none";
-      }
-    }
-
-    if ($("globalServerSelect")) {
-      $("globalServerSelect").onchange = (e) => {
-        selectedGuildId = e.target.value;
-        updateGuildInviteLink();
-      };
-    }
-
-    async function startOAuthLogin() {
-      try {
-        const data = await request("/api/auth/url");
-        if (data && data.url) {
-          window.open(data.url, "discord_auth", "width=580,height=750");
-        }
-      } catch (e) {
-        await startDemoLogin();
-      }
-    }
-
-    async function startDemoLogin() {
-      try {
-        const res = await request("/api/auth/demo", { method: "POST" });
-        if (res && res.session) {
-          localStorage.setItem("m1_session_id", res.session.id);
-          await initAuth();
-          load();
-        }
-      } catch (err) {
-        console.error("Demo login error:", err);
-      }
-    }
-
-    if ($("discordLoginBtn")) $("discordLoginBtn").onclick = startOAuthLogin;
-    if ($("bannerLoginBtn")) $("bannerLoginBtn").onclick = startOAuthLogin;
-    if ($("bannerDemoBtn")) $("bannerDemoBtn").onclick = startDemoLogin;
-
-    if ($("logoutBtn")) {
-      $("logoutBtn").onclick = async () => {
-        try {
-          await request("/api/auth/logout", { method: "POST" });
-        } catch (e) {}
-        localStorage.removeItem("m1_session_id");
-        currentUser = null;
-        await initAuth();
-        load();
-      };
-    }
-
-    window.addEventListener("message", async (event) => {
-      if (event.data && event.data.type === "OAUTH_AUTH_SUCCESS") {
-        if (event.data.session) {
-          localStorage.setItem("m1_session_id", event.data.session);
-        }
-        await initAuth();
-        load();
-      }
     });
 
     load();
