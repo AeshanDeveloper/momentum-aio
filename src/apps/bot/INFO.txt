@@ -1,0 +1,425 @@
+Here's how I'd define each one.
+
+
+---
+
+Main.ts
+
+The entry point.
+
+Create BotManager
+↓
+await bot.start()
+
+Nothing else.
+
+
+---
+
+Manager.ts
+
+The brain of the bot.
+
+Owns everything.
+
+class BotManager
+
+Contains:
+
+Discord client
+
+CommandRegistry
+
+EventRegistry
+
+MiddlewarePipeline
+
+PluginManager
+
+PermissionResolver
+
+
+Methods:
+
+start()
+stop()
+reload()
+
+Everything starts here.
+
+
+---
+
+client/Client.ts
+
+Creates your custom Discord client.
+
+class Client extends Discord.Client
+
+Should contain:
+
+login()
+
+destroy()
+
+references to managers if needed
+
+
+No command loading.
+
+No plugin loading.
+
+
+---
+
+client/Gateway.ts
+
+Responsible only for gateway state.
+
+Things like
+
+reconnecting
+
+shard status
+
+latency
+
+gateway events
+
+
+Think of it as a wrapper around Discord gateway behaviour.
+
+
+---
+
+commands/Command.ts
+
+Base command.
+
+Every command extends this.
+
+export abstract class Command {
+    abstract execute(ctx: Context)
+}
+
+
+---
+
+commands/Context.ts
+
+Everything a command needs.
+
+Instead of
+
+execute(interaction)
+
+you do
+
+execute(context)
+
+Context contains
+
+interaction
+
+client
+
+user
+
+guild
+
+member
+
+services
+
+container
+
+
+
+---
+
+commands/Registry.ts
+
+Stores commands.
+
+Literally
+
+Map<String, Command>
+
+Functions
+
+register()
+
+unregister()
+
+get()
+
+has()
+
+all()
+
+No filesystem.
+
+No loading.
+
+
+---
+
+commands/Loader.ts
+
+Finds command files.
+
+Imports them.
+
+Registers them.
+
+scan directory
+
+↓
+
+import command
+
+↓
+
+registry.register()
+
+
+---
+
+commands/Builder.ts
+
+Helps create slash command JSON.
+
+Instead of repeatedly writing
+
+new SlashCommandBuilder()
+
+
+---
+
+events/Event.ts
+
+Base event.
+
+export abstract class Event {
+    abstract execute(...)
+}
+
+
+---
+
+events/Registry.ts
+
+Exactly like command registry.
+
+Stores events.
+
+
+---
+
+events/Loader.ts
+
+Loads events from plugins/files.
+
+Registers them.
+
+
+---
+
+events/Dispatcher.ts
+
+The bridge.
+
+Receives
+
+interactionCreate
+
+↓
+
+find listeners
+
+↓
+
+execute them
+
+or
+
+messageCreate
+
+↓
+
+event.execute()
+
+This is the class that actually hooks into Discord.js.
+
+
+---
+
+collectors/Collector.ts
+
+Base collector.
+
+Reaction collectors.
+
+Button collectors.
+
+Modal collectors.
+
+Etc.
+
+
+---
+
+collectors/Manager.ts
+
+Keeps track of active collectors.
+
+Starts them.
+
+Stops them.
+
+Removes expired ones.
+
+
+---
+
+middleware/Middleware.ts
+
+Base middleware.
+
+next()
+
+Authentication.
+
+Cooldowns.
+
+Logging.
+
+Etc.
+
+
+---
+
+middleware/Pipeline.ts
+
+Runs middleware.
+
+middleware1
+
+↓
+
+middleware2
+
+↓
+
+middleware3
+
+↓
+
+command
+
+
+---
+
+permissions/Permission.ts
+
+Permission definition.
+
+Examples
+
+ADMIN
+
+OWNER
+
+MANAGE_GUILD
+
+
+---
+
+permissions/Resolver.ts
+
+Checks permissions.
+
+Can execute command?
+
+↓
+
+yes/no
+
+
+---
+
+builders/Builder.ts
+
+Generic builder utilities.
+
+Could later build
+
+embeds
+
+buttons
+
+select menus
+
+slash commands
+
+
+I'd actually rename this because it's vague.
+
+Maybe
+
+builders/
+
+BaseBuilder.ts
+
+
+---
+
+Component.ts
+
+I'd rename this too.
+
+"Component" could mean anything.
+
+If it's the base class for
+
+commands
+
+events
+
+middleware
+
+
+rename it
+
+BaseModule.ts
+
+or
+
+BaseComponent.ts
+
+
+---
+
+One thing I'd change
+
+You currently have Registry + Loader for both commands and events.
+
+That's good.
+
+I'd also introduce a Manager above them.
+
+Example:
+
+CommandManager
+├── Registry
+├── Loader
+└── Builder
+
+Then the BotManager only has to call:
+
+commandManager.load();
+eventManager.load();
+
+instead of juggling registries and loaders directly.
+
+That separation scales really well when you eventually have hundreds of commands, events, and plugins.

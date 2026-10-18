@@ -1,0 +1,130 @@
+import mysql, {
+  type Pool,
+  PoolConnection,
+  type PoolOptions,
+  type ResultSetHeader,
+  type RowDataPacket,
+} from "mysql2/promise";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from 'url';
+
+import config from "@config";
+import logger from "@logger";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+class DatabaseManager {
+  private pool: Pool | null = null;
+
+  public async initialize(executor = "unknown"): Promise<Pool> {
+	  let start = Date.now()
+    if (this.pool) return this.pool;
+
+    try {
+		logger.debug("[DB] Initializing database...")
+      const poolConfig: PoolOptions = {
+        host: config.database.production.connection.host,
+        port: Number(config.database.production.connection.port),
+        user: config.database.production.connection.user,
+        password: config.database.production.connection.password,
+        database: config.database.production.connection.database,
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0,
+        enableKeepAlive: true,
+      };
+
+      if (process.env.DB_SSL_REQUIRED.toLowerCase() === "true") {
+        poolConfig.ssl = {
+          ca: fs.readFileSync(
+            path.join(
+              __dirname,
+              "../../",
+              process.env.DB_CA_CERTIFICATE
+            ),
+            "utf-8"
+          ),
+          rejectUnauthorized: true,
+          minVersion: "TLSv1.2",
+        };
+      }
+
+      this.pool = mysql.createPool(poolConfig);
+
+      await this.pool.query("SELECT 1");
+	  global.eBus.publish(global.EventsList.DATABASE_CONNECTED, {
+		  executor: executor,
+		  database: config.database.production.connection.host,
+		  duration: (Date.now() - start)
+	  })
+      logger.info("[DB] Connected to MySQL successfully.");
+
+      return this.pool;
+    } catch (error) {
+      this.pool = null;
+
+      logger.error("[DB] Failed to connect to MySQL.");
+      logger.error(error);
+
+      throw error;
+    }
+  }
+
+	public async query<T extends QueryResult>(
+        sql: string,
+        params: unknown[] = []
+    ): Promise<[T, FieldPacket[]]> {
+        if (!this.pool) {
+            const error = new Error("Database has not been initialized.");
+            logger.error("[DB] Database has not been initialized.");
+            throw error;
+        }
+
+        try {
+            return await this.pool.query<T>(sql, params);
+        } catch (err) {
+            logger.error("[DB] Database query failed.", {
+                sql,
+                params,
+                error: err,
+            });
+
+            throw err;
+        }
+    }
+
+    public async getConnection(): Promise<PoolConnection> {
+        if (!this.pool) {
+            const error = new Error("Database has not been initialized.");
+            logger.error(error.message);
+            throw error;
+        }
+
+        return this.pool.getConnection();
+    }
+
+    public async disconnect(): Promise<void> {
+        if (!this.pool) return;
+
+        await this.pool.end();
+        this.pool = null;
+
+        logger.info("[DB] Disconnected from MySQL.");
+    }
+
+    public async ping(): Promise<void> {
+        await this.query("SELECT 1");
+    }
+
+    public isConnected(): boolean {
+        return this.pool !== null;
+    }
+
+    public getPool(): Pool | undefined {
+        return this.pool ?? undefined;
+    }
+}
+
+export default new DatabaseManager();

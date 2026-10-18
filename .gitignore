@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+src/apps/web/frontend/node_modules/
+src/apps/web1/node_modules/
+src/apps/web/node_modules/
+src/apps/web-old/node_modules/
+
+# Build Output
+dist/
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Coverage
+coverage/
+
+# Cache
+.cache/
+.turbo/
+
+# IDE
+.vscode/
+.idea/
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# next
+.next/
+src/apps/web/frontend/.next/
+.*/
+
+# Bash Scripts
+scripts/connect.sh
+scripts/connect.bat

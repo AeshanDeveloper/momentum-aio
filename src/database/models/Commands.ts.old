@@ -1,0 +1,186 @@
+import DatabaseManager from "@database/Database";
+import type CommandRecord from "@shared/types/CommandRecord";
+
+export default class CommandModel {
+	private readonly database;
+    constructor() {
+		this.database = DatabaseManager;
+	}
+
+    async register(command: CommandRecord): Promise<void> {
+        await this.database.query(
+            `
+            INSERT INTO shop_commands (
+                command_id,
+                plugin_id,
+                name,
+                description,
+				enabled,
+                type,
+                aliases,
+                owner_only,
+                developer_only,
+                premium_only,
+                guild_only,
+                nsfw,
+				user_permissions,
+				bot_permissions,
+				status,
+                cooldown,
+                checksum,
+                registered_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+            [
+                command.commandId,
+                command.pluginId,
+                command.name,
+                command.description,
+				command.enabled,
+                command.type,
+                JSON.stringify(command.aliases),
+                command.ownerOnly,
+                command.developerOnly,
+                command.premiumOnly,
+                command.guildOnly,
+                command.nsfw,
+				command.userPermissions,
+				command.botPermissions,
+				command.status,
+                command.cooldown,
+                command.checksum,
+                command.registeredBy,
+            ]
+        );
+    }
+	
+	async update(id, command: any): Promise<void> {
+    	await this.database.query(
+        	`
+        	UPDATE shop_commands
+        	SET
+				plugin_id = ?,
+				name = ?,
+            	description = ?,
+            	enabled = ?,
+            	type = ?,
+            	aliases = ?,
+            	owner_only = ?,
+            	developer_only = ?,
+            	premium_only = ?,
+            	guild_only = ?,
+            	nsfw = ?,
+            	status = ?,
+            	cooldown = ?,
+            	checksum = ?,
+            	registered_by = ?
+        	WHERE command_id = ?
+        	`,
+        	[
+				command.pluginId,
+				command.name,
+            	command.description,
+            	command.enabled,
+            	command.type,
+            	JSON.stringify(command.aliases),
+            	command.ownerOnly,
+            	command.developerOnly,
+            	command.premiumOnly,
+            	command.guildOnly,
+            	command.nsfw,
+            	command.status,
+            	command.cooldown,
+            	command.checksum,
+            	command.registeredBy,
+            	command.commandId,
+        	]
+    	);
+	}
+
+    async delete(commandId: string): Promise<boolean> {
+        const result = await this.database.query(
+            `DELETE FROM shop_commands WHERE command_id = ?`,
+            [commandId]
+        );
+
+        return result.affectedRows > 0;
+    }
+
+    async unregister(commandId: string): Promise<boolean> {
+        return this.delete(commandId);
+    }
+
+    async get<K extends keyof CommandRecord>(
+        field: K,
+        value: CommandRecord[K]
+    ): Promise<CommandRecord[]> {
+        const rows = await this.database.query(
+            `SELECT * FROM shop_commands WHERE \`${String(field)}\` = ?`,
+            [value]
+        );
+
+        return rows as CommandRecord[];
+    }
+
+    async getAll(): Promise<CommandRecord[]> {
+        const rows = await this.database.query(
+            `SELECT * FROM shop_commands`
+        );
+
+        return rows as CommandRecord[];
+    }
+	
+	async findById(commandId: string): Promise<CommandRecord | null> {
+    	const [rows] = await this.database.query(
+        	"SELECT * FROM shop_commands WHERE command_id = ? LIMIT 1",
+        	[commandId]
+    	);
+	
+    	const commands = rows as CommandRecord[];
+    	return commands.length ? commands[0] : null;
+	}
+	
+	async findByPluginId(pluginId: string): Promise<CommandRecord[]> {
+    	const [rows] = await this.database.query(
+        	"SELECT * FROM shop_commands WHERE plugin_id = ?",
+        	[pluginId]
+    	);
+		return rows;
+    	//return rows as CommandRecord[];
+	}
+	
+	async exists(commandId: string): Promise<boolean> {
+    	const [rows] = await this.database.query(
+        	"SELECT 1 FROM shop_commands WHERE command_id = ? LIMIT 1",
+        	[commandId]
+    	);
+	
+    	return (rows as any[]).length > 0;
+	}
+	
+	async existsByPluginNameType(pluginId: string, name: string, type: CommandType): Promise<boolean> {
+    	const [rows] = await this.database.query(
+        	`SELECT 1
+            FROM shop_commands
+            WHERE plugin_id = ? AND name = ? AND type = ?
+            LIMIT 1`,
+        	[pluginId, name, type]
+    	);
+	
+    	return (rows as any[]).length > 0;
+	}
+	
+	async setStatus(commandId: string, status: any): Promise<void> {
+    	await this.database.query(
+        	`
+        	UPDATE shop_commands
+        	SET status = ?
+        	WHERE command_id = ?
+        	`,
+        	[
+            	status,
+            	commandId,
+        	]
+    	);
+	}
+}
