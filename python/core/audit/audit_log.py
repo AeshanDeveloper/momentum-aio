@@ -35,14 +35,22 @@ class AuditLog:
             "audit_id": audit_id,
             "auditId": audit_id,
             "guild_id": entry.get("guildId") or entry.get("guild_id"),
+            "guildId": entry.get("guildId") or entry.get("guild_id"),
             "actor_id": entry.get("actorId") or entry.get("actor_id"),
+            "actorId": entry.get("actorId") or entry.get("actor_id"),
             "actor_type": entry.get("actorType") or entry.get("actor_type", "system"),
+            "actorType": entry.get("actorType") or entry.get("actor_type", "system"),
             "action": entry.get("action", "unknown"),
             "resource_type": entry.get("resourceType") or entry.get("resource_type", "system"),
+            "resourceType": entry.get("resourceType") or entry.get("resource_type", "system"),
             "resource_id": entry.get("resourceId") or entry.get("resource_id"),
+            "resourceId": entry.get("resourceId") or entry.get("resource_id"),
             "previous_state": prev_state,
+            "previousState": prev_state,
             "new_state": new_state,
+            "newState": new_state,
             "changed_fields": changed_fields(prev_state, new_state),
+            "changedFields": changed_fields(prev_state, new_state),
             "timestamp": time.time(),
             "source": entry.get("source", "system"),
             "success": bool(entry.get("success", True)),
@@ -77,7 +85,15 @@ class AuditLog:
         except Exception:
             pass
 
-        return cls._in_memory[skip : skip + limit]
+        items = list(cls._in_memory)
+        if filter_dict.get("action"):
+            act = filter_dict["action"]
+            if isinstance(act, dict) and "$regex" in act:
+                pat = act["$regex"]
+                items = [e for e in items if re.search(pat, e.get("action", ""), re.IGNORECASE)]
+            elif isinstance(act, str):
+                items = [e for e in items if act.lower() in e.get("action", "").lower()]
+        return items[skip : skip + limit]
 
     @classmethod
     async def count(cls, filter_dict: Optional[Dict[str, Any]] = None) -> int:
@@ -87,3 +103,15 @@ class AuditLog:
             return await col.count_documents(filter_dict)
         except Exception:
             return len(cls._in_memory)
+
+    @classmethod
+    async def get(cls, audit_id: str) -> Optional[Dict[str, Any]]:
+        target = str(audit_id).lower()
+        for e in cls._in_memory:
+            if (e.get("audit_id") or e.get("auditId") or "").lower() == target:
+                return e
+        try:
+            col = database.collection(cls.COLLECTION)
+            return await col.find_one({"$or": [{"audit_id": audit_id}, {"auditId": audit_id}]})
+        except Exception:
+            return None

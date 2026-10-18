@@ -1,6 +1,7 @@
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from apps.bot.discord.permissions.resolver import parse_duration
+from core.security.blacklist import parse_duration_str
 
 class NoPrefixManager:
     """
@@ -16,7 +17,7 @@ class NoPrefixManager:
         if not entry:
             return False
 
-        expires_at = entry.get("expires_at")
+        expires_at = entry.get("expiresAt") or entry.get("expires_at")
         if expires_at and expires_at <= time.time():
             cls._cache.pop(str(user_id), None)
             return False
@@ -24,20 +25,40 @@ class NoPrefixManager:
         return True
 
     @classmethod
-    def grant_no_prefix(cls, user_id: str, added_by: str, duration: Optional[str] = None) -> Dict[str, Any]:
-        expires_at = parse_duration(duration) if duration else None
+    def add(cls, user_id: str, duration: Optional[str] = None, added_by: str = "System") -> Dict[str, Any]:
+        expires_at = parse_duration_str(duration) if duration else None
         record = {
+            "userId": str(user_id),
             "user_id": str(user_id),
+            "addedBy": str(added_by),
             "added_by": str(added_by),
+            "expiresAt": expires_at,
             "expires_at": expires_at,
-            "created_at": time.time(),
+            "createdAt": time.time(),
         }
         cls._cache[str(user_id)] = record
         return {"success": True, "entry": record}
 
     @classmethod
-    def revoke_no_prefix(cls, user_id: str, removed_by: str) -> Dict[str, Any]:
+    def remove(cls, user_id: str, removed_by: str = "System") -> Dict[str, Any]:
         if str(user_id) in cls._cache:
             del cls._cache[str(user_id)]
             return {"success": True, "revoked": True}
         return {"success": False, "error": "User does not have no-prefix authorization."}
+
+    @classmethod
+    def list(cls) -> List[Dict[str, Any]]:
+        now = time.time()
+        res = []
+        for uid, entry in list(cls._cache.items()):
+            exp = entry.get("expiresAt") or entry.get("expires_at")
+            if exp and exp <= now:
+                cls._cache.pop(uid, None)
+                continue
+            res.append(entry)
+        return res
+
+    # Parity aliases
+    grant_no_prefix = add
+    revoke_no_prefix = remove
+    hasNoPrefix = has_no_prefix

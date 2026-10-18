@@ -1,10 +1,10 @@
 import time
-import discord
 from typing import List, Any
-from config.settings import settings, COLORS, EMOJIS
-from config.strings import get_string
+import discord
+
+from config.settings import config, COLORS, EMOJIS
 from database.database import database
-from sdk.discord.builders import ContainerBuilder
+from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
 from shared.types.command_record import CommandType
 
 name = "ping"
@@ -14,15 +14,26 @@ category = "Utility"
 usage = "ping"
 cooldown = 3.0
 
-async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
-    is_slash = (command_type == CommandType.SLASH)
+async def execute(ctx: Any, command_type: str, message: Any, args: List[str] = None):
+    if args is None:
+        args = []
+
+    is_slash = (command_type == CommandType.SLASH or str(command_type).lower() == "slash")
+    colors = COLORS
+    c_default = colors.get("default", "#FF7B00")
+
+    online_icon = EMOJIS.get("online") or EMOJIS.get("success") or "🟢"
+    ping_icon = EMOJIS.get("ping") or EMOJIS.get("latency") or "📡"
+    ws_icon = EMOJIS.get("latency") or "⚡"
+    db_icon = EMOJIS.get("database") or "💾"
+
     client = getattr(ctx, "client", getattr(message, "client", None))
     start = time.time()
 
-    # Measure DB latency
+    # Measure real database ping
     db_start = time.time()
     db_ok = await database.ping()
-    db_ms = round((time.time() - db_start) * 1000, 1) if db_ok else "Unavailable"
+    db_ms = round((time.time() - db_start) * 1000, 1) if db_ok else None
 
     roundtrip = round((time.time() - start) * 1000, 1)
     gateway_ping = (
@@ -30,30 +41,30 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         if (client and hasattr(client, "latency") and client.latency is not None and client.latency >= 0)
         else "Connecting..."
     )
+    db_ping_str = f"{db_ms}ms" if db_ms is not None else "Unavailable"
 
-    title = get_string("commands.ping.title", "🟢 Systems Operational")
-    roundtrip_str = get_string("commands.ping.roundtrip", "• **Message Roundtrip:** `{roundtrip}ms`", roundtrip=roundtrip)
-    gateway_str = get_string("commands.ping.gateway", "• **Gateway Heartbeat:** `{heartbeat}`", heartbeat=gateway_ping)
-    db_str = get_string("commands.ping.database", "• **Database Response:** `{db_latency}`", db_latency=f"{db_ms}ms" if isinstance(db_ms, (int, float)) else str(db_ms))
-    footer_str = get_string("commands.ping.footer", "Metrics represent live cluster & socket health.")
-
-    embed = (
+    container = (
         ContainerBuilder()
-        .set_accent_color(COLORS.get("default", "#FF7B00"))
-        .add_text_display(f"### {EMOJIS.get('ping', '📡')} {title}")
-        .add_separator()
-        .add_text_display(f"{roundtrip_str}\n{gateway_str}\n{db_str}")
-        .add_separator()
-        .set_footer(footer_str)
+        .set_accent_color(c_default)
+        .add_text_display(f"### {ping_icon} Bot Connectivity Status")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(
+            f"• **Status:** {online_icon} `Online`\n"
+            f"• **Message Roundtrip:** `{roundtrip}ms`\n"
+            f"• **Gateway Heartbeat:** {ws_icon} `{gateway_ping}`\n"
+            f"• **Database Response:** {db_icon} `{db_ping_str}`"
+        )
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display("-# Metrics represent live cluster & socket health.")
         .build()
     )
 
     if is_slash and hasattr(message, "response"):
         if message.response.is_done():
-            await message.followup.send(embed=embed)
+            await message.followup.send(embed=container.embed)
         else:
-            await message.response.send_message(embed=embed)
+            await message.response.send_message(embed=container.embed)
     elif hasattr(message, "reply"):
-        await message.reply(embed=embed)
+        await message.reply(embed=container.embed)
     elif hasattr(message, "channel"):
-        await message.channel.send(embed=embed)
+        await message.channel.send(embed=container.embed)

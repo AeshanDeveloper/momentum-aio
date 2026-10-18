@@ -1,44 +1,61 @@
 from typing import List, Any
 import discord
-from config.settings import settings
-from config.strings import get_string
+
+from config.settings import config, COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
+from sdk.discord.builders import ContainerBuilder
 
 name = "say"
-aliases = ["echo"]
-description = "Dispatch a message to a specific channel."
-category = "Dev"
-usage = "say [#channel] <text>"
-cooldown = 1.0
+aliases = ["b", "echo"]
+description = "Broadcast text into the channel (Bot Owner Only)."
+category = "Owner"
+usage = "say <text>"
 owner_only = True
 
-async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
-    is_slash = (command_type == CommandType.SLASH)
+async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = None):
+    if args is None:
+        args = []
+
+    is_slash = (command_type == CommandType.SLASH or str(command_type).lower() == "slash")
     author = getattr(message, "user", None) if is_slash else getattr(message, "author", None)
+    author_id = str(author.id) if author else ""
 
-    if not is_bot_owner(author.id):
-        err = get_string("permissions.owner_only", "❌ Access Denied: This command is strictly reserved for the global bot owner.")
-        if is_slash and hasattr(message, "response"):
-            await message.response.send_message(err, ephemeral=True)
+    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
+    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+
+    if not is_bot_owner(author_id) and author_id not in owner_ids:
+        denied_msg = "❌ **Access Denied**: This command is restricted to the bot owner."
+        if is_slash and hasattr(message, "response") and not message.response.is_done():
+            return await message.response.send_message(denied_msg, ephemeral=True)
         elif hasattr(message, "reply"):
-            await message.reply(err)
+            return await message.reply(denied_msg)
         return
 
-    if not args:
+    say_message = " ".join(args).strip()
+    if not say_message:
+        c = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("default", "#3B82F6"))
+            .add_text_display("No text provided")
+            .build()
+        )
+        if is_slash and hasattr(message, "response") and not message.response.is_done():
+            return await message.response.send_message(embed=c.embed)
+        elif hasattr(message, "reply"):
+            return await message.reply(embed=c.embed)
         return
 
-    target_channel = message.channel
-    content_words = args
-    if getattr(message, "channel_mentions", None) and len(message.channel_mentions) > 0:
-        target_channel = message.channel_mentions[0]
-        content_words = args[1:]
+    # Delete invoking message if possible
+    if not is_slash and hasattr(message, "delete"):
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
-    text = " ".join(content_words).strip()
-    if text:
-        await target_channel.send(text)
-        confirm = get_string("commands.dev.say_sent", "💬 Message dispatched to <#{channel_id}>.", channel_id=target_channel.id)
-        if is_slash and hasattr(message, "response"):
-            await message.response.send_message(confirm, ephemeral=True)
-        elif hasattr(message, "reply"):
-            await message.reply(confirm)
+    channel = getattr(message, "channel", None)
+    if channel:
+        await channel.send(say_message, allowed_mentions=discord.AllowedMentions(users=True))
+
+    if is_slash and hasattr(message, "response") and not message.response.is_done():
+        await message.response.send_message("Message sent.", ephemeral=True)
