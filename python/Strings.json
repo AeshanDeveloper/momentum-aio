@@ -95,7 +95,9 @@
       "closed": "🔒 Ticket #{ticket_id} has been resolved and closed.",
       "transcript_title": "📜 Transcript Archive // Ticket #{ticket_id}",
       "transcript_desc": "Full transcript record generated for ticket #{ticket_id} by <@{actor_id}>.",
-      "no_permission": "❌ You do not have permission to manage this ticket."
+      "no_permission": "❌ You do not have permission to manage this ticket.",
+      "already_closed": "⚠️ This ticket is already closed.",
+      "ticket_not_found": "❌ Ticket channel or record not found."
     },
     "announce": {
       "title": "📢 Server Announcement",
@@ -104,7 +106,44 @@
     "channel": {
       "locked": "🔒 Channel <#{channel_id}> has been locked.",
       "unlocked": "🔓 Channel <#{channel_id}> has been unlocked.",
-      "info_title": "Channel Metrics: #{name}"
+      "info_title": "Channel Metrics: #{name}",
+      "id": "• **Channel ID:** `{channel_id}`",
+      "type": "• **Type:** `{channel_type}`",
+      "created": "• **Created:** <t:{timestamp}:R>"
+    },
+    "commandmanage": {
+      "disabled": "⛔ Command `{command}` has been disabled in this server.",
+      "enabled": "✅ Command `{command}` has been enabled in this server.",
+      "protected": "⚠️ Command `{command}` is essential and cannot be disabled.",
+      "not_found": "❌ Command `{command}` was not found in the registry."
+    },
+    "dev": {
+      "eval_title": "⚡ Runtime Evaluation",
+      "reboot_scheduled": "🔄 System reboot initiated...",
+      "reload_success": "✅ Reloaded {commands_count} commands and {plugins_count} plugins.",
+      "status_title": "🖥️ Platform Diagnostics & Cluster Status",
+      "errors_title": "⚠️ Error Tracker Diagnostics",
+      "errors_empty": "✅ No recent unhandled command errors recorded.",
+      "audit_title": "📜 System Audit Trail (Last {count} Entries)",
+      "say_sent": "💬 Message dispatched to <#{channel_id}>.",
+      "botprofile_updated": "✅ Bot presence and profile updated successfully.",
+      "listservers_title": "🌐 Connected Servers ({count} Total)"
+    },
+    "bug": {
+      "submitted": "✅ Thank you! Bug report `#{report_id}` has been recorded for review.",
+      "empty": "❌ Please provide a detailed description of the bug encountered."
+    },
+    "notifications": {
+      "title": "🔔 System Notifications",
+      "none": "No active platform broadcasts at this time."
+    },
+    "update": {
+      "title": "🚀 MomentumOne System Changelog",
+      "latest_version": "Latest Release: v{version}"
+    },
+    "invites": {
+      "title": "🔗 Server Invite Analytics",
+      "user_invites": "• **Tracked Invites:** `{count}` members joined"
     }
   },
   "dashboard": {

@@ -54,10 +54,17 @@ class PluginManager:
                 logger.error(f"[PluginManager] Main entry file {main_file} not found for {item}")
                 continue
 
+            if self.registry.get(item):
+                continue
+
             try:
-                spec = importlib.util.spec_from_file_location(f"plugin_{item}", main_file)
+                import sys
+                pkg_name = f"plugins.{item}"
+                spec = importlib.util.spec_from_file_location(pkg_name, main_file)
                 if spec and spec.loader:
                     mod = importlib.util.module_from_spec(spec)
+                    mod.__package__ = pkg_name
+                    sys.modules[pkg_name] = mod
                     spec.loader.exec_module(mod)
                     
                     plugin_class = getattr(mod, "Plugin", getattr(mod, item, None))

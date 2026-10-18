@@ -9,13 +9,10 @@
     "node": ">=21.0.0"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc && cp public/index.html dist/index.html",
-    "start": "tsx src/index.ts",
-    "start:node": "node dist/src/index.js",
-    "check": "biome check .",
-    "lint": "biome lint .",
-    "format": "biome format . --write",
+    "dev": "python3 main.py",
+    "build": "python3 -m compileall python main.py app.py",
+    "start": "python3 main.py",
+    "test": "python3 tests/test_python_framework.py",
     "clean": "rm -rf dist"
   },
   "dependencies": {

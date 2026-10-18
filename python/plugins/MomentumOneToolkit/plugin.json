@@ -1,0 +1,8 @@
+{
+  "name": "MomentumOneToolkit",
+  "version": "1.0.0",
+  "main": "__init__.py",
+  "description": "Standard toolkit offering general, utility, moderation, ai, tickets, and dev commands.",
+  "author": "MomentumOne",
+  "license": "MIT"
+}

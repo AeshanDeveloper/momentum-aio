@@ -1,13 +1,30 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Callable
+
+class LoaderTarget:
+    def __init__(self):
+        self.enabled: bool = False
+        self.directory: str = ""
+        self.mapper: Optional[Callable[[Any], Any]] = None
+
+    def set_enabled(self, val: bool) -> "LoaderTarget":
+        self.enabled = val
+        return self
+    setEnabled = set_enabled
+
+    def set_directory(self, d: str) -> "LoaderTarget":
+        self.directory = d
+        return self
+    setDirectory = set_directory
+
+    def set_mapper(self, fn: Callable[[Any], Any]) -> "LoaderTarget":
+        self.mapper = fn
+        return self
+    setMapper = set_mapper
 
 class AutoLoaderConfig:
     def __init__(self):
-        self.commands_enabled = False
-        self.commands_directory = "commands"
-        self.commands_mapper = None
-        self.events_enabled = False
-        self.events_directory = "events"
-        self.events_mapper = None
+        self.commands = LoaderTarget()
+        self.events = LoaderTarget()
 
 class PluginContext:
     """
