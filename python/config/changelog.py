@@ -2,6 +2,23 @@ from typing import List, Dict, Any, Optional
 
 CHANGELOG_RELEASES: List[Dict[str, Any]] = [
     {
+        "version": "26.7.21",
+        "codename": "Interactive Component Forge",
+        "releasedAt": "2026-10-18",
+        "headline": "Interactive ContainerBuilder SDK, 4-button help pagination, and server command management panel.",
+        "summary": "Full interactive Discord component parity with fluid containers, pagination collectors, and server command quick-toggling.",
+        "features": [
+            "Interactive ContainerBuilder SDK: Action rows, button builders, select menus, and message component collectors.",
+            "Dynamic Help Browser: 4-button pagination (⏮️, ◀️, ▶️, ⏭️), category views, and fuzzy search suggestions.",
+            "Command Management Panel: Server-level command status tables and quick toggle select menus.",
+            "Dashboard Multi-Server Sync: Live server selector, invite link generator, and admin auth session handling."
+        ],
+        "bugFixes": [
+            "Resolved ReferenceError in frontend initAuth handler.",
+            "Fixed callback wiring for message component interaction collectors."
+        ]
+    },
+    {
         "version": "26.7.20",
         "codename": "Architectural Harmony",
         "releasedAt": "2026-10-18",
