@@ -11,7 +11,9 @@ dist/
 # Environment
 .env
 .env.local
-
+python/venv
+python/venv.
+*/__pycache__
 # Logs
 *.log
 logs/
