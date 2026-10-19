@@ -2,7 +2,7 @@ import time
 from typing import List, Any
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import COLORS, EMOJIS
 from database.database import database
 from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
 from shared.types.command_record import CommandType

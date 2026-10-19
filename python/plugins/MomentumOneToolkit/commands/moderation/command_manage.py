@@ -3,7 +3,7 @@ import math
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from core.security.server_commands import ServerCommandManager
 from apps.bot.discord.permissions.permission import Permissions
 from shared.types.command_record import CommandType
@@ -13,10 +13,10 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SelectMenuBuilder,
     SelectMenuTypes,
-    ButtonStyle,
     SeparatorSpacingSize,
-    MessageFlags,
 )
+
+from discord import MessageFlags, ButtonStyle
 
 PAGE_SIZE = 8
 

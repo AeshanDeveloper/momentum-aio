@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any, Callable
 import discord
-
+from enum import Enum
 class ButtonBuilder:
     def __init__(self):
         self.label: Optional[str] = None
@@ -209,3 +209,18 @@ class ContainerBuilder:
         if self._footer_text:
             embed.set_footer(text=self._footer_text)
         return embed
+
+
+class SeparatorSpacingSize(Enum):
+    Small = discord.SeparatorSpacing.small
+    Large = discord.SeparatorSpacing.large
+	
+class SelectMenuTypes(Enum):
+	CUSTOM = 0
+	USER = 1
+	ROLE = 2
+	CHANNEL = 3
+
+class ButtonStyle(Enum):
+    Small = discord.SeparatorSpacing.small
+    Large = discord.SeparatorSpacing.large

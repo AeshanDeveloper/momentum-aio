@@ -2,17 +2,16 @@ import math
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
 from sdk.discord.builders import (
     ContainerBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle,
     SeparatorSpacingSize,
-    MessageFlags,
 )
+from discord import MessageFlags, ButtonStyle
 
 PAGE_SIZE = 8
 

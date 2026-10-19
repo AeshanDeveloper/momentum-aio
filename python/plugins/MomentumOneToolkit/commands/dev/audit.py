@@ -4,7 +4,7 @@ import json
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import COLORS, EMOJIS
 from core.audit.audit_log import AuditLog
 from core.logging.error_tracker import ErrorTracker
 from apps.bot.discord.permissions.resolver import is_bot_owner
@@ -15,10 +15,9 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SelectMenuBuilder,
     SelectMenuTypes,
-    ButtonStyle,
     SeparatorSpacingSize,
-    MessageFlags,
 )
+from discord import MessageFlags, ButtonStyle
 
 PAGE_SIZE = 5
 

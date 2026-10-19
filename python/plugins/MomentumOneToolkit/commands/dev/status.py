@@ -5,21 +5,20 @@ import math
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from core.telemetry.observability import ObservabilityManager
 from core.telemetry.discord_telemetry import DiscordTelemetry
-from core.logging.error_tracker import error_tracker
+from core.logging.error_tracker import ErrorTracker as error_tracker
 from database.database import database
 from shared.types.command_record import CommandType
 from sdk.discord.builders import (
     ContainerBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle,
-    SeparatorSpacingSize,
-    MessageFlags,
+    SeparatorSpacingSize
 )
+from discord import MessageFlags, ButtonStyle
 
 VERSION = "26.7.20"
 

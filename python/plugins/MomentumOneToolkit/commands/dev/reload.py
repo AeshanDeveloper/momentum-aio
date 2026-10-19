@@ -2,7 +2,7 @@ import sys
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from apps.bot.discord.commands.registry import commands_registry
 from shared.types.command_record import CommandType
@@ -11,9 +11,9 @@ from sdk.discord.builders import (
     ActionRowBuilder,
     SelectMenuBuilder,
     SelectMenuTypes,
-    SeparatorSpacingSize,
-    MessageFlags,
+    SeparatorSpacingSize
 )
+from discord import MessageFlags, ButtonStyle
 
 name = "reload"
 aliases = ["rel", "rld", "refresh"]

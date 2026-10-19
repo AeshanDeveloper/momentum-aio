@@ -3,7 +3,7 @@ import time
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import COLORS, EMOJIS
 from core.logging.error_tracker import ErrorTracker
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
@@ -13,10 +13,9 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SelectMenuBuilder,
     SelectMenuTypes,
-    ButtonStyle,
-    SeparatorSpacingSize,
-    MessageFlags,
+    SeparatorSpacingSize
 )
+from discord import MessageFlags, ButtonStyle
 
 PAGE_SIZE = 5
 

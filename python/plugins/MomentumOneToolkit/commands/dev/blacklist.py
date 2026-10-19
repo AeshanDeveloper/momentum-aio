@@ -4,7 +4,7 @@ import time
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import config, COLORS, EMOJIS
+from config.settings import COLORS, EMOJIS
 from core.security.blacklist import BlacklistManager, parse_duration_str
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
@@ -14,10 +14,9 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SelectMenuBuilder,
     SelectMenuTypes,
-    ButtonStyle,
     SeparatorSpacingSize,
-    MessageFlags,
 )
+from discord import MessageFlags, ButtonStyle
 
 name = "blacklist"
 aliases = ["bl", "globalblacklist", "gbl"]
