@@ -6,7 +6,7 @@ import traceback
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from database.database import database
 from shared.types.command_record import CommandType
@@ -14,6 +14,7 @@ from sdk.discord.builders import (
     ContainerBuilder,
     SeparatorSpacingSize
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 
@@ -70,16 +71,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     author_id = str(author.id) if author else ""
     client = getattr(ctx, "client", getattr(message, "client", None))
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
         denied_text = "❌ **Access Denied**: The `eval` command is strictly restricted to authorized bot owners."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(denied_text, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(denied_text)
-        return
+        return await send_response(message, denied_text, ephemeral=True)
 
     raw_code = " ".join(args).strip()
     clean_code = raw_code
@@ -93,11 +89,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
 
     if not clean_code:
         err_text = "❌ **Missing Code**: Please provide a Python expression or script to evaluate."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(err_text, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(err_text)
-        return
+        return await send_response(message, err_text, ephemeral=True)
 
     start_time = time.perf_counter()
     result = None
@@ -110,7 +102,8 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         "ctx": ctx,
         "args": args,
         "db": database,
-        "config": config,
+        "config": settings,
+        "settings": settings,
         "os": os,
         "sys": sys,
         "time": time,
@@ -166,9 +159,4 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         .build()
     )
 
-    if is_slash and hasattr(message, "response") and not message.response.is_done():
-        return await message.response.send_message(view=container, ephemeral=True)
-    elif hasattr(message, "reply"):
-        return await message.reply(view=container)
-    elif hasattr(message, "channel"):
-        return await message.channel.send(view=container)
+    return await send_response(message, container)

@@ -2,13 +2,14 @@ import aiohttp
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
 from sdk.discord.builders import (
     ContainerBuilder,
     SeparatorSpacingSize,
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 name = "botprofile"
@@ -28,8 +29,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     client = getattr(ctx, "client", getattr(message, "client", None))
     guild = getattr(message, "guild", None)
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = settings.OWNER_IDS
 
     E = EMOJIS
     C = COLORS
@@ -39,7 +39,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     info_icon = E.get("info") or "💡"
 
     async def reply(title: str, description: str, is_error: bool = False):
-        color = C.get("error", "#EF4444") if is_error else C.get("success", "#10B981")
+        color = C.get("error", "#B21F1F") if is_error else C.get("success", "#3FD438")
         box = (
             ContainerBuilder()
             .set_accent_color(color)
@@ -47,13 +47,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display(description)
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=box.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=box.embed)
+        return await send_response(message, box)
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
         return await reply("Access Restricted", "This command is strictly restricted to bot owners.", True)
+
 
     def show_usage():
         usage_text = "\n".join([

@@ -15,7 +15,7 @@
     "strict": false,
     "strictNullChecks": true,
     "noCheck": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "noUncheckedSideEffectImports": true,
@@ -26,6 +26,7 @@
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
+      "@/*": ["./src/*"],
       "@app": ["./src/core/application/Application.ts"],
       "@container": ["./src/core/container/Container.ts"],
       "@config": ["./src/config/index.ts"],

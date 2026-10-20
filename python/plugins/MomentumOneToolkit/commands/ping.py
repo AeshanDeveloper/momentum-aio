@@ -5,6 +5,7 @@ import discord
 from config.settings import COLORS, EMOJIS
 from database.database import database
 from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
+from sdk.discord.response import send_response
 from shared.types.command_record import CommandType
 
 name = "ping"
@@ -20,10 +21,10 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str] = N
 
     is_slash = (command_type == CommandType.SLASH or str(command_type).lower() == "slash")
     colors = COLORS
-    c_default = colors.get("default", "#FF7B00")
+    c_default = colors.get("default", "#0844C5")
 
-    online_icon = EMOJIS.get("online") or EMOJIS.get("success") or "🟢"
-    ping_icon = EMOJIS.get("ping") or EMOJIS.get("latency") or "📡"
+    online_icon = EMOJIS.get("online") or "🟢"
+    ping_icon = EMOJIS.get("ping") or "📡"
     ws_icon = EMOJIS.get("latency") or "⚡"
     db_icon = EMOJIS.get("database") or "💾"
 
@@ -59,12 +60,5 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str] = N
         .build()
     )
 
-    if is_slash and hasattr(message, "response"):
-        if message.response.is_done():
-            await message.followup.send(view=container)
-        else:
-            await message.response.send_message(view=container)
-    elif hasattr(message, "reply"):
-        await message.reply(view=container)
-    elif hasattr(message, "channel"):
-        await message.channel.send(view=container)
+    return await send_response(message, container)
+

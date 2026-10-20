@@ -2,7 +2,7 @@ import math
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
 from sdk.discord.builders import (
@@ -11,6 +11,7 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SeparatorSpacingSize,
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 PAGE_SIZE = 8
@@ -143,16 +144,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     author_id = str(author.id) if author else ""
     client = getattr(ctx, "client", getattr(message, "client", None))
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
         denied_msg = "❌ **Access Denied**: This command is strictly restricted to authorized bot owners."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(denied_msg, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(denied_msg)
-        return
+        return await send_response(message, denied_msg, ephemeral=True)
 
     query = None
     page = 0
@@ -164,11 +160,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             query = " ".join(args).strip()
 
     built, page, total_pages = build_server_list_container(client, page, query)
-    reply_msg = None
-    if is_slash and hasattr(message, "response") and not message.response.is_done():
-        reply_msg = await message.response.send_message(embed=built.embed, view=built.view)
-    elif hasattr(message, "reply"):
-        reply_msg = await message.reply(embed=built.embed, view=built.view)
+    reply_msg = await send_response(message, built)
 
     target_msg = reply_msg or message
     collector = built.create_message_component_collector(

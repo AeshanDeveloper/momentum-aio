@@ -3,7 +3,7 @@ import time
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from core.logging.error_tracker import ErrorTracker
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
@@ -15,8 +15,9 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
-import config;
+
 
 PAGE_SIZE = 5
 
@@ -79,8 +80,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     author = getattr(message, "user", None) if is_slash else getattr(message, "author", None)
     author_id = str(author.id) if author else ""
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = settings.OWNER_IDS
 
     E = EMOJIS
     C = COLORS
@@ -112,11 +112,8 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display("This command is strictly restricted to bot owners.")
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=deny_box.embed, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=deny_box.embed)
-        return
+        return await send_response(message, deny_box, ephemeral=True)
+
 
     sub = args[0].lower() if args else None
     target_error_id = None
@@ -131,11 +128,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display(f"Successfully cleared **{count}** error log record(s) from the database.")
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=container.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=container.embed)
-        return
+        return await send_response(message, container)
 
     if sub in ["view", "get"] and len(args) > 1:
         target_error_id = args[1].strip()
@@ -153,18 +146,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                 .add_text_display(f"Error ID `{target_error_id}` was not found in the database.")
                 .build()
             )
-            if is_slash and hasattr(message, "response") and not message.response.is_done():
-                return await message.response.send_message(embed=not_found.embed, ephemeral=True)
-            elif hasattr(message, "reply"):
-                return await message.reply(embed=not_found.embed)
-            return
+            return await send_response(message, not_found, ephemeral=True)
 
         detail_box = build_error_detail_container(record, emojis, colors)
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=detail_box.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=detail_box.embed)
-        return
+        return await send_response(message, detail_box)
+
 
     # Pagination: list [page]
     initial_page = 1
@@ -272,11 +258,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         return container.build(), safe_page, total_pages
 
     built, page, total_pages = await render_page(initial_page)
-    reply_msg = None
-    if is_slash and hasattr(message, "response") and not message.response.is_done():
-        reply_msg = await message.response.send_message(embed=built.embed, view=built.view)
-    elif hasattr(message, "reply"):
-        reply_msg = await message.reply(embed=built.embed, view=built.view)
+    reply_msg = await send_response(message, built)
 
     target_msg = reply_msg or message
     collector = built.create_message_component_collector(
@@ -291,19 +273,19 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             page = max(1, page - 1)
             updated, page, _ = await render_page(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated)
 
         async def on_next(inter):
             nonlocal page
             page += 1
             updated, page, _ = await render_page(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated)
 
         async def on_refresh(inter):
             updated, page, _ = await render_page(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated)
 
         async def on_inspect(inter):
             vals = getattr(getattr(inter, "data", None), "get", lambda k, d=None: None)("values", [])
@@ -313,13 +295,12 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                 record = await ErrorTracker.get(e_id)
                 if record:
                     detail = build_error_detail_container(record, emojis, colors)
-                    if hasattr(inter, "response"):
-                        await inter.response.send_message(embed=detail.embed, ephemeral=True)
+                    await send_response(inter, detail, ephemeral=True)
                 else:
-                    if hasattr(inter, "response"):
-                        await inter.response.send_message("Error record not found.", ephemeral=True)
+                    await send_response(inter, "Error record not found.", ephemeral=True)
 
         collector.on(f"{session_id}:prev", on_prev)
         collector.on(f"{session_id}:next", on_next)
         collector.on(f"{session_id}:refresh", on_refresh)
         collector.on(f"{session_id}:inspect", on_inspect)
+

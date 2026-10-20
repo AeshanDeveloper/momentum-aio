@@ -2,7 +2,7 @@ import re
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from core.security.blacklist import BlacklistManager
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
@@ -10,6 +10,7 @@ from sdk.discord.builders import (
     ContainerBuilder,
     SeparatorSpacingSize
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 name = "unblacklist"
@@ -35,16 +36,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     author = getattr(message, "user", None) if is_slash else getattr(message, "author", None)
     author_id = str(author.id) if author else ""
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
         denied_msg = "❌ **Access Denied**: This command is restricted to the bot owner."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(denied_msg, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(denied_msg)
-        return
+        return await send_response(message, denied_msg, ephemeral=True)
 
     E = EMOJIS
     C = COLORS
@@ -70,10 +66,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display(description)
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=box.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=box.embed)
+        return await send_response(message, box)
 
     target_type = args[0].lower() if args else None
     target_raw = args[1] if len(args) > 1 else None

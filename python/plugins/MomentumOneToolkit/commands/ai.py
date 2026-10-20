@@ -4,7 +4,9 @@ import discord
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from sdk.discord.builders import ContainerBuilder
+from sdk.discord.response import send_response
 from shared.types.command_record import CommandType
+
 
 name = "ai"
 aliases = ["askai", "gemini", "chat"]
@@ -57,9 +59,9 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             text_out = text_out[:3800] + "... (truncated)"
 
         title = get_string("commands.ai.title", "✨ Google Gemini Intelligence")
-        embed = (
+        view = (
             ContainerBuilder()
-            .set_accent_color(COLORS.get("info", "#3B82F6"))
+            .set_accent_color(COLORS.get("info", COLORS.get("default", "#0844C5")))
             .add_text_display(f"### {title}")
             .add_separator()
             .add_text_display(f"**Prompt:** {prompt}\n\n{text_out}")
@@ -67,17 +69,15 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             .build()
         )
 
-        if is_slash and hasattr(message, "followup"):
-            await message.followup.send(embed=embed)
-        elif placeholder:
-            await placeholder.edit(content=None, embed=embed)
-        elif hasattr(message, "reply"):
-            await message.reply(embed=embed)
+        if placeholder:
+            await placeholder.edit(content=None, view=view)
+        else:
+            await send_response(message, view)
 
     except Exception as err:
         err_str = str(err)
         err_title = get_string("commands.ai.error_title", "❌ AI Generation Error")
-        embed = (
+        err_view = (
             ContainerBuilder()
             .set_accent_color(COLORS.get("error", "#B21F1F"))
             .add_text_display(f"### {err_title}")
@@ -85,9 +85,8 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             .add_text_display(f"Failed to generate response: `{err_str[:300]}`")
             .build()
         )
-        if is_slash and hasattr(message, "followup"):
-            await message.followup.send(embed=embed)
-        elif placeholder:
-            await placeholder.edit(content=None, embed=embed)
-        elif hasattr(message, "reply"):
-            await message.reply(embed=embed)
+        if placeholder:
+            await placeholder.edit(content=None, view=err_view)
+        else:
+            await send_response(message, err_view)
+

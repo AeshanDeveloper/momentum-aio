@@ -37,15 +37,41 @@ class Settings:
 
 settings = Settings()
 
-# Colors and Emojis
+import json
+
+def _load_json_config(filename: str) -> Dict[str, Any]:
+    # Check current directory, python/config, src/config, root
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), filename),
+        os.path.join(os.path.dirname(__file__), "..", "..", "src", "config", filename),
+        os.path.join(os.path.dirname(__file__), "..", filename),
+        os.path.join(os.getcwd(), "src", "config", filename),
+        os.path.join(os.getcwd(), "python", "config", filename),
+    ]
+    for p in possible_paths:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return {}
+
+_central_colors = _load_json_config("Colors.json")
+_central_emojis = _load_json_config("Emojis.json")
+
+# Central Colors with fallback
 COLORS: Dict[str, str] = {
     "default": "#FF7B00",
     "success": "#3FD438",
     "error": "#B21F1F",
+    "warning": "#F59E0B",
     "warn": "#F59E0B",
     "info": "#3B82F6",
+    **_central_colors
 }
 
+# Central Emojis with fallback
 EMOJIS: Dict[str, str] = {
     "online": "🟢",
     "offline": "🔴",
@@ -54,6 +80,7 @@ EMOJIS: Dict[str, str] = {
     "database": "💾",
     "success": "✅",
     "error": "❌",
+    "warning": "⚠️",
     "warn": "⚠️",
     "info": "ℹ️",
     "shield": "🛡️",
@@ -61,4 +88,19 @@ EMOJIS: Dict[str, str] = {
     "profile": "👤",
     "ticket": "🎫",
     "ban": "🚫",
+    "time": "⏱️",
+    "search": "🔍",
+    "history": "📜",
+    "server": "🖥️",
+    "user": "👤",
+    "cmd": "⚡",
+    "commands": "⚡",
+    **{k: v for k, v in _central_emojis.items() if v}
 }
+
+def get_color(key: str, default: str = "#FF7B00") -> str:
+    return COLORS.get(key, default)
+
+def get_emoji(key: str, default: str = "") -> str:
+    return EMOJIS.get(key, default)
+

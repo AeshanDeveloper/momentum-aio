@@ -13,6 +13,7 @@ from core.telemetry.observability import ObservabilityManager
 from apps.bot.discord.permissions.resolver import check_permissions, is_bot_owner
 from apps.bot.discord.commands.registry import commands_registry
 from sdk.discord.builders import ContainerBuilder
+from sdk.discord.response import send_response
 from shared.types.command_record import CommandType, CommandStatus
 
 name = "interactionCreate"
@@ -77,7 +78,9 @@ async def execute(ctx: Any, interaction: discord.Interaction):
 
         start_time = time.time()
         try:
-            await cmd.execute(ctx, CommandType.SLASH, interaction, args)
+            cmd_result = await cmd.execute(ctx, CommandType.SLASH, interaction, args)
+            if cmd_result is not None:
+                await send_response(interaction, cmd_result)
             dur_ms = round((time.time() - start_time) * 1000, 2)
             ObservabilityManager.record_command(cmd.name, "slash", True, dur_ms)
         except Exception as exec_err:
@@ -91,10 +94,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 "args": args
             })
             err_msg = f"❌ Execution error: `{str(exec_err)[:150]}` (Error ID: `{error_record['error_id']}`)"
-            if interaction.response.is_done():
-                await interaction.followup.send(err_msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(err_msg, ephemeral=True)
+            await send_response(interaction, err_msg, ephemeral=True)
 
     except Exception as err:
         logger.error(f"[SlashHandler] Interaction processing error: {err}")

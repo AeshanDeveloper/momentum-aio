@@ -3,7 +3,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
 from sdk.discord.builders import (
@@ -12,6 +12,7 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SeparatorSpacingSize
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 name = "reboot"
@@ -29,21 +30,16 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     author_id = str(author.id) if author else ""
     client = getattr(ctx, "client", getattr(message, "client", None))
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
-    bot_name = bot_cfg.get("name", "MomentumOne")
+    owner_ids = settings.OWNER_IDS
+    bot_name = settings.BOT_NAME
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
         denied_msg = "❌ **Access Denied**: This command is restricted to the bot owner."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(denied_msg, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(denied_msg)
-        return
+        return await send_response(message, denied_msg, ephemeral=True)
 
-    reload_emoji = EMOJIS.get("reload") or EMOJIS.get("reboot") or EMOJIS.get("loading") or "🔄"
-    dot_emoji = EMOJIS.get("dot") or EMOJIS.get("info") or "•"
-    accent_color = COLORS.get("cmd_reboot") or COLORS.get("default") or "#3B82F6"
+    reload_emoji = EMOJIS.get("reload") or EMOJIS.get("refresh") or "🔄"
+    dot_emoji = EMOJIS.get("info") or "•"
+    accent_color = COLORS.get("cmd_reboot") or COLORS.get("default") or "#0844C5"
 
     confirm_id = f"reboot_confirm_{id(message)}"
     cancel_id = f"reboot_cancel_{id(message)}"
@@ -74,11 +70,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     container.add_action_row(action_row)
 
     built = container.build()
-    reply_msg = None
-    if is_slash and hasattr(message, "response") and not message.response.is_done():
-        reply_msg = await message.response.send_message(embed=built.embed, view=built.view)
-    elif hasattr(message, "reply"):
-        reply_msg = await message.reply(embed=built.embed, view=built.view)
+    reply_msg = await send_response(message, built)
 
     target_msg = reply_msg or message
     collector = built.create_message_component_collector(
@@ -90,7 +82,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     if collector:
         async def on_cancel(inter):
             if hasattr(inter, "response"):
-                await inter.response.edit_message(content="Reboot cancelled.", embed=None, view=None)
+                await inter.response.edit_message(content="Reboot cancelled.", view=None)
 
         async def on_confirm(inter):
             restarting_container = (
@@ -104,10 +96,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                 .build()
             )
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=restarting_container.embed, view=None)
+                await inter.response.edit_message(view=restarting_container)
 
             if client:
                 await client.close()
 
         collector.on(cancel_id, on_cancel)
         collector.on(confirm_id, on_confirm)
+

@@ -14,6 +14,7 @@ from core.telemetry.observability import ObservabilityManager
 from apps.bot.discord.permissions.resolver import check_permissions, is_bot_owner
 from apps.bot.discord.commands.registry import commands_registry
 from sdk.discord.builders import ContainerBuilder
+from sdk.discord.response import send_response
 from shared.types.command_record import CommandType, CommandStatus
 
 name = "messageCreate"
@@ -67,7 +68,7 @@ async def execute(ctx: Any, message: discord.Message):
         spam_result = AntiSpamService.check(str(message.author.id))
         if not spam_result.get("allowed"):
             if spam_result.get("blacklisted"):
-                blocked_embed = (
+                blocked_view = (
                     ContainerBuilder()
                     .set_accent_color(COLORS.get("error", "#B21F1F"))
                     .add_text_display(f"### {EMOJIS.get('ban', '🚫')} Command Rejected")
@@ -75,9 +76,9 @@ async def execute(ctx: Any, message: discord.Message):
                     .add_text_display(get_string("antispam.blacklisted", "🚫 You have been automatically blacklisted for excessive command spam."))
                     .build()
                 )
-                await message.reply(embed=blocked_embed)
+                await send_response(message, blocked_view)
             elif spam_result.get("warning"):
-                await message.reply(content=spam_result["warning"])
+                await send_response(message, spam_result["warning"])
             return
 
         # 4. Owner-Only Check
@@ -87,13 +88,13 @@ async def execute(ctx: Any, message: discord.Message):
         # 5. Guild Only Check
         if found_command.guild_only and not message.guild:
             guild_only_msg = get_string("permissions.guild_only", "❌ This command can only be used inside a Discord server.")
-            await message.reply(content=guild_only_msg)
+            await send_response(message, guild_only_msg)
             return
 
         # 6. Server Command Disabled Check
         if message.guild:
             if ServerCommandManager.is_command_disabled(str(message.guild.id), found_command.name):
-                disabled_embed = (
+                disabled_view = (
                     ContainerBuilder()
                     .set_accent_color(COLORS.get("warn", "#F59E0B"))
                     .add_text_display(f"### ⚠️ Command Disabled in Server")
@@ -101,7 +102,7 @@ async def execute(ctx: Any, message: discord.Message):
                     .add_text_display(f"The command `{found_command.name}` has been disabled by server administrators.")
                     .build()
                 )
-                await message.reply(embed=disabled_embed)
+                await send_response(message, disabled_view)
                 return
 
             # 7. Proper Permissions Check
@@ -115,7 +116,7 @@ async def execute(ctx: Any, message: discord.Message):
                 if perms.get("missing_user"):
                     missing_str = ", ".join(perms.get("missing_user_names", []))
                     err_text = get_string("permissions.missing_user_permission", "❌ You lack the required permission(s) to execute this command: {permissions}", permissions=missing_str)
-                    perm_embed = (
+                    perm_view = (
                         ContainerBuilder()
                         .set_accent_color(COLORS.get("error", "#B21F1F"))
                         .add_text_display(f"### {EMOJIS.get('error', '❌')} Access Denied")
@@ -123,13 +124,13 @@ async def execute(ctx: Any, message: discord.Message):
                         .add_text_display(err_text)
                         .build()
                     )
-                    await message.reply(embed=perm_embed)
+                    await send_response(message, perm_view)
                     return
 
                 if perms.get("missing_bot"):
                     missing_str = ", ".join(perms.get("missing_bot_names", []))
                     err_text = get_string("permissions.missing_bot_permission", "❌ The bot lacks required permission(s) in this channel: {permissions}", permissions=missing_str)
-                    perm_embed = (
+                    perm_view = (
                         ContainerBuilder()
                         .set_accent_color(COLORS.get("error", "#B21F1F"))
                         .add_text_display(f"### {EMOJIS.get('error', '❌')} Bot Missing Permissions")
@@ -137,7 +138,7 @@ async def execute(ctx: Any, message: discord.Message):
                         .add_text_display(err_text)
                         .build()
                     )
-                    await message.reply(embed=perm_embed)
+                    await send_response(message, perm_view)
                     return
 
         # 8. Cooldown Check
@@ -146,7 +147,7 @@ async def execute(ctx: Any, message: discord.Message):
         if cd_check.get("on_cooldown"):
             rem = cd_check.get("remaining_seconds", 1.0)
             cd_msg = get_string("cooldown.active", "⏳ **Cooldown Active**: Please wait `{remaining}s` before using `{command}` again.", remaining=rem, command=command_name)
-            cd_embed = (
+            cd_view = (
                 ContainerBuilder()
                 .set_accent_color(COLORS.get("warn", "#F59E0B"))
                 .add_text_display(f"### ⏱️ Cooldown Active")
@@ -154,7 +155,7 @@ async def execute(ctx: Any, message: discord.Message):
                 .add_text_display(cd_msg)
                 .build()
             )
-            await message.reply(embed=cd_embed)
+            await send_response(message, cd_view)
             return
 
         # Apply Cooldown
@@ -163,7 +164,9 @@ async def execute(ctx: Any, message: discord.Message):
         # 9. Execute Command
         start_time = time.time()
         try:
-            await found_command.execute(ctx, CommandType.PREFIX, message, args)
+            cmd_result = await found_command.execute(ctx, CommandType.PREFIX, message, args)
+            if cmd_result is not None:
+                await send_response(message, cmd_result)
             dur_ms = round((time.time() - start_time) * 1000, 2)
             ObservabilityManager.record_command(found_command.name, "prefix", True, dur_ms)
         except Exception as exec_err:
@@ -176,7 +179,7 @@ async def execute(ctx: Any, message: discord.Message):
                 "command_type": "PREFIX",
                 "args": args,
             })
-            err_embed = (
+            err_view = (
                 ContainerBuilder()
                 .set_accent_color(COLORS.get("error", "#B21F1F"))
                 .add_text_display(f"### {EMOJIS.get('error', '❌')} Command Execution Error")
@@ -189,7 +192,7 @@ async def execute(ctx: Any, message: discord.Message):
                 )
                 .build()
             )
-            await message.reply(embed=err_embed)
+            await send_response(message, err_view)
 
     except Exception as err:
         logger.error(f"[PrefixHandler] Uncaught dispatcher error: {err}")

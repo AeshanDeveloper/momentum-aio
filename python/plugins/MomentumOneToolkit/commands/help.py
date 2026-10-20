@@ -3,6 +3,7 @@ import discord
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from sdk.discord.builders import ContainerBuilder
+from sdk.discord.response import send_response
 from apps.bot.discord.commands.registry import commands_registry
 from shared.types.command_record import CommandType
 
@@ -26,20 +27,15 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             cooldown_str = get_string("commands.help.cooldown", "• **Cooldown:** `{cooldown}s`", cooldown=cmd.cooldown)
             perms_str = get_string("commands.help.permissions", "• **Required Permissions:** {permissions}", permissions="Owner" if cmd.owner_only else "General")
 
-            embed = (
+            view = (
                 ContainerBuilder()
-                .set_accent_color(COLORS.get("info", "#3B82F6"))
+                .set_accent_color(COLORS.get("info", COLORS.get("default", "#0844C5")))
                 .add_text_display(f"### {EMOJIS.get('info', 'ℹ️')} {title}")
                 .add_separator()
                 .add_text_display(f"{cmd.description}\n\n{usage_str}\n{aliases_str}\n{cooldown_str}\n{perms_str}")
                 .build()
             )
-
-            if is_slash and hasattr(message, "response"):
-                await message.response.send_message(embed=embed)
-            elif hasattr(message, "reply"):
-                await message.reply(embed=embed)
-            return
+            return await send_response(message, view)
 
     # Category overview
     all_cmds = commands_registry.list_all()
@@ -57,8 +53,8 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
 
     builder = (
         ContainerBuilder()
-        .set_accent_color(COLORS.get("default", "#FF7B00"))
-        .add_text_display(f"### 📖 {title}")
+        .set_accent_color(COLORS.get("cmd_help", COLORS.get("default", "#0844C5")))
+        .add_text_display(f"### {EMOJIS.get('help', '📖')} {title}")
         .add_separator()
         .add_text_display(desc)
     )
@@ -67,11 +63,6 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         label = get_string("commands.help.category_label", "Category // {category}", category=cat_name)
         builder.add_field(f"{label} ({len(cmd_list)})", " ".join(cmd_list), inline=False)
 
-    embed = builder.build()
+    view = builder.build()
+    return await send_response(message, view)
 
-    if is_slash and hasattr(message, "response"):
-        await message.response.send_message(embed=embed)
-    elif hasattr(message, "reply"):
-        await message.reply(embed=embed)
-    elif hasattr(message, "channel"):
-        await message.channel.send(embed=embed)
