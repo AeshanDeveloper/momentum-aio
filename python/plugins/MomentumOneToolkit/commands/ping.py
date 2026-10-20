@@ -61,10 +61,10 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str] = N
 
     if is_slash and hasattr(message, "response"):
         if message.response.is_done():
-            await message.followup.send(embed=container.embed)
+            await message.followup.send(view=container)
         else:
-            await message.response.send_message(embed=container.embed)
+            await message.response.send_message(view=container)
     elif hasattr(message, "reply"):
-        await message.reply(embed=container.embed)
+        await message.reply(view=container)
     elif hasattr(message, "channel"):
-        await message.channel.send(embed=container.embed)
+        await message.channel.send(view=container)

@@ -16,6 +16,7 @@ from sdk.discord.builders import (
     SeparatorSpacingSize
 )
 from discord import MessageFlags, ButtonStyle
+import config;
 
 PAGE_SIZE = 5
 

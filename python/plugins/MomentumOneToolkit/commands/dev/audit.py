@@ -179,7 +179,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             text = f"❌ Error with ID `{error_id}` was not found in the database."
             return await (message.response.send_message(text, ephemeral=True) if is_slash else message.reply(text))
         container = build_error_detail_container(record, emojis, colors)
-        return await (message.response.send_message(embed=container.embed) if is_slash else message.reply(embed=container.embed))
+        return await (message.response.send_message(view=container) if is_slash else message.reply(view=container))
 
     # Subcommand: view <auditId>
     if sub == "view":
@@ -192,7 +192,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             text = f"❌ Audit record `{audit_id}` was not found."
             return await (message.response.send_message(text, ephemeral=True) if is_slash else message.reply(text))
         container = build_audit_detail_container(entry, emojis, colors)
-        return await (message.response.send_message(embed=container.embed) if is_slash else message.reply(embed=container.embed))
+        return await (message.response.send_message(view=container) if is_slash else message.reply(view=container))
 
     # Subcommand: errors [page]
     if sub == "errors":
