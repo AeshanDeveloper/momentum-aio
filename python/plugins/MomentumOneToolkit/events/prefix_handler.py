@@ -19,10 +19,24 @@ from shared.types.command_record import CommandType, CommandStatus
 name = "messageCreate"
 description = "Official prefix command handler ~ By MomentumOne"
 
+# Prevent the same Discord message from being processed twice.
+_processed_messages: set[int] = set()
+
+
 async def execute(ctx: Any, message: discord.Message):
     try:
         if not message.author or message.author.bot:
             return
+
+        # Duplicate-message guard (the only addition).
+        if message.id in _processed_messages:
+            return
+
+        _processed_messages.add(message.id)
+
+        if len(_processed_messages) > 10_000:
+            _processed_messages.clear()
+            _processed_messages.add(message.id)
 
         # 1. Global User Blacklist Check
         user_bl = BlacklistManager.is_user_blacklisted(str(message.author.id))

@@ -4,6 +4,7 @@ import time
 import math
 from typing import List, Dict, Any, Optional
 import discord
+import config;
 
 from config.settings import COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
