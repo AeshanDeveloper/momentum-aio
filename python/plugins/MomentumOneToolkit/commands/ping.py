@@ -2,10 +2,8 @@ import time
 from typing import List, Any
 import discord
 
-from config.settings import COLORS, EMOJIS
 from database.database import database
-from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
-from sdk.discord.response import send_response
+from sdk.discord.response import send_ui
 from shared.types.command_record import CommandType
 
 name = "ping"
@@ -18,15 +16,6 @@ cooldown = 3.0
 async def execute(ctx: Any, command_type: str, message: Any, args: List[str] = None):
     if args is None:
         args = []
-
-    is_slash = (command_type == CommandType.SLASH or str(command_type).lower() == "slash")
-    colors = COLORS
-    c_default = colors.get("default", "#0844C5")
-
-    online_icon = EMOJIS.get("online") or "🟢"
-    ping_icon = EMOJIS.get("ping") or "📡"
-    ws_icon = EMOJIS.get("latency") or "⚡"
-    db_icon = EMOJIS.get("database") or "💾"
 
     client = getattr(ctx, "client", getattr(message, "client", None))
     start = time.time()
@@ -44,21 +33,13 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str] = N
     )
     db_ping_str = f"{db_ms}ms" if db_ms is not None else "Unavailable"
 
-    container = (
-        ContainerBuilder()
-        .set_accent_color(c_default)
-        .add_text_display(f"### {ping_icon} Bot Connectivity Status")
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(
-            f"• **Status:** {online_icon} `Online`\n"
-            f"• **Message Roundtrip:** `{roundtrip}ms`\n"
-            f"• **Gateway Heartbeat:** {ws_icon} `{gateway_ping}`\n"
-            f"• **Database Response:** {db_icon} `{db_ping_str}`"
-        )
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display("-# Metrics represent live cluster & socket health.")
-        .build()
+    return await send_ui(
+        message,
+        "commands.ping.status",
+        variables={
+            "roundtrip": roundtrip,
+            "gateway_ping": gateway_ping,
+            "db_ping": db_ping_str,
+        },
+        style="info"
     )
-
-    return await send_response(message, container)
-

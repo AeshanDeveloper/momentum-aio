@@ -3,10 +3,9 @@ import discord
 from typing import Dict, Any, List, Optional
 from database.database import database
 from core.logging.logger import logger
-from config.settings import settings, COLORS, EMOJIS
+from config.settings import settings
 from config.strings import get_string
-from sdk.discord.builders import ContainerBuilder, ActionRowBuilder, ButtonBuilder
-from sdk.discord.response import send_response
+from sdk.discord import build_ui, send_response, ActionRowBuilder, ButtonBuilder
 from .types import TicketRecord, TicketGuildConfig, TicketStatus, TicketType
 
 class TicketManager:
@@ -103,26 +102,28 @@ class TicketManager:
         col = database.collection(cls.TICKETS_COLLECTION)
         await col.insert_one(record)
 
-        # Send welcome panel inside ticket channel
-        welcome_view = (
-            ContainerBuilder()
-            .set_accent_color(COLORS.get("default", "#FF7B00"))
-            .add_text_display(f"### {EMOJIS.get('ticket', '🎫')} Support Ticket #{counter}")
-            .add_text_display(
-                f"Welcome <@{creator.id}>! Staff has been notified and will assist you shortly.\n\n"
-                f"• **Subject:** `{subject}`\n"
-                f"• **Type:** `{ticket_type}`\n"
-                f"• **Created:** <t:{int(now)}:R>"
-            )
-            .add_action_row(
-                lambda row: row.add_button(
-                    lambda btn: btn.set_label("Close Ticket")
+        welcome_title = get_string("commands.ticket.welcome_title", variables={"ticket_id": counter})
+        welcome_desc = get_string("commands.ticket.welcome_desc", variables={
+            "creator_id": creator.id,
+            "subject": subject,
+            "ticket_type": ticket_type,
+            "created_ts": int(now)
+        })
+        btn_close_label = get_string("commands.ticket.btn_close", default="Close Ticket")
+
+        welcome_view = build_ui(
+            title=welcome_title,
+            description=welcome_desc,
+            style="default",
+            action_rows=[
+                ActionRowBuilder().add_button(
+                    ButtonBuilder()
+                    .set_label(btn_close_label)
                     .set_custom_id(f"ticket_close_{channel.id}")
                     .set_style("danger")
-                    .set_emoji("🔒")
+                    .set_emoji("lock")
                 )
-            )
-            .build()
+            ]
         )
 
         await send_response(channel, welcome_view)
@@ -141,12 +142,11 @@ class TicketManager:
         record = await col.find_one({"channel_id": cid}) or cls._tickets_cache.get(cid)
 
         if not record:
-            return {"success": False, "error": get_string("commands.ticket.ticket_not_found", "Ticket not found.")}
+            return {"success": False, "error": get_string("commands.ticket.ticket_not_found.description", "Ticket not found.")}
 
         if record.get("status") == TicketStatus.CLOSED:
-            return {"success": False, "error": get_string("commands.ticket.already_closed", "Ticket already closed.")}
+            return {"success": False, "error": get_string("commands.ticket.already_closed.description", "Ticket already closed.")}
 
-        # Collect transcript
         transcript_lines = []
         try:
             async for msg in channel.history(limit=200, oldest_first=True):
@@ -169,16 +169,13 @@ class TicketManager:
         if cid in cls._tickets_cache:
             cls._tickets_cache[cid].update(updates)
 
-        close_view = (
-            ContainerBuilder()
-            .set_accent_color(COLORS.get("warn", "#F59E0B"))
-            .add_text_display(f"### 🔒 Ticket #{record.get('ticket_id')} Closed")
-            .add_text_display(
-                f"This ticket was closed by <@{actor_id}>.\n"
-                f"**Reason:** {reason}\n\n"
-                f"Channel will be deleted in 10 seconds."
-            )
-            .build()
+        close_title = get_string("commands.ticket.close_title", variables={"ticket_id": record.get("ticket_id")})
+        close_desc = get_string("commands.ticket.close_desc", variables={"actor_id": actor_id, "reason": reason})
+
+        close_view = build_ui(
+            title=close_title,
+            description=close_desc,
+            style="warning"
         )
         await send_response(channel, close_view)
 

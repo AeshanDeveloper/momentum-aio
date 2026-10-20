@@ -2,6 +2,7 @@ import discord
 from typing import Any
 from core.logging.logger import logger
 from plugins.MomentumOneToolkit.tickets.manager import TicketManager
+from sdk.discord import send_ui
 
 name = "interactionComponent"
 description = "Button and select menu component dispatcher"
@@ -22,7 +23,13 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 reason="Closed via interactive ticket button"
             )
             if not res.get("success"):
-                await interaction.followup.send(f"❌ {res.get('error')}", ephemeral=True)
+                await send_ui(
+                    interaction,
+                    "commands.ticket.close_failed",
+                    variables={"error": res.get("error", "Failed to close ticket.")},
+                    ephemeral=True,
+                    style="error"
+                )
 
     except Exception as err:
         logger.error(f"[ComponentHandler] Component execution error: {err}")

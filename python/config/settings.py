@@ -1,5 +1,9 @@
 import os
-from typing import List, Dict, Any
+import json
+import logging
+from typing import List, Dict, Any, Optional
+
+_logger = logging.getLogger("MomentumOne.Config")
 
 class Settings:
     BOT_NAME: str = os.getenv("BOT_NAME", "MomentumOne")
@@ -37,70 +41,50 @@ class Settings:
 
 settings = Settings()
 
-import json
-
 def _load_json_config(filename: str) -> Dict[str, Any]:
-    # Check current directory, python/config, src/config, root
     possible_paths = [
         os.path.join(os.path.dirname(__file__), filename),
-        os.path.join(os.path.dirname(__file__), "..", "..", "src", "config", filename),
         os.path.join(os.path.dirname(__file__), "..", filename),
-        os.path.join(os.getcwd(), "src", "config", filename),
         os.path.join(os.getcwd(), "python", "config", filename),
+        os.path.join(os.getcwd(), "src", "config", filename),
+        os.path.join(os.getcwd(), filename),
     ]
     for p in possible_paths:
-        if os.path.isfile(p):
+        if p and os.path.isfile(p):
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as err:
+                _logger.warning(f"Error loading {filename} from {p}: {err}")
     return {}
 
-_central_colors = _load_json_config("Colors.json")
-_central_emojis = _load_json_config("Emojis.json")
+class AuthoritativeDict(dict):
+    def __init__(self, name: str, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._name = name
 
-# Central Colors with fallback
-COLORS: Dict[str, str] = {
-    "default": "#FF7B00",
-    "success": "#3FD438",
-    "error": "#B21F1F",
-    "warning": "#F59E0B",
-    "warn": "#F59E0B",
-    "info": "#3B82F6",
-    **_central_colors
-}
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in self and super().__getitem__(key):
+            return super().__getitem__(key)
+        if default is not None:
+            return default
+        _logger.warning(f"[{self._name}] Key '{key}' not found in configuration.")
+        return ""
 
-# Central Emojis with fallback
-EMOJIS: Dict[str, str] = {
-    "online": "🟢",
-    "offline": "🔴",
-    "ping": "📡",
-    "latency": "⚡",
-    "database": "💾",
-    "success": "✅",
-    "error": "❌",
-    "warning": "⚠️",
-    "warn": "⚠️",
-    "info": "ℹ️",
-    "shield": "🛡️",
-    "owner": "👑",
-    "profile": "👤",
-    "ticket": "🎫",
-    "ban": "🚫",
-    "time": "⏱️",
-    "search": "🔍",
-    "history": "📜",
-    "server": "🖥️",
-    "user": "👤",
-    "cmd": "⚡",
-    "commands": "⚡",
-    **{k: v for k, v in _central_emojis.items() if v}
-}
+    def __getitem__(self, key: str) -> Any:
+        if key in self and super().__getitem__(key):
+            return super().__getitem__(key)
+        _logger.warning(f"[{self._name}] Key '{key}' not found in configuration.")
+        return ""
 
-def get_color(key: str, default: str = "#FF7B00") -> str:
-    return COLORS.get(key, default)
+_raw_colors = _load_json_config("Colors.json")
+_raw_emojis = _load_json_config("Emojis.json")
+
+COLORS: Dict[str, str] = AuthoritativeDict("ColorsConfig", _raw_colors)
+EMOJIS: Dict[str, str] = AuthoritativeDict("EmojisConfig", _raw_emojis)
+
+def get_color(key: str, default: str = "#0844C5") -> str:
+    return COLORS.get(key, default) or default
 
 def get_emoji(key: str, default: str = "") -> str:
-    return EMOJIS.get(key, default)
-
+    return EMOJIS.get(key, default) or default

@@ -16,7 +16,7 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize,
 )
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
 
 name = "blacklist"

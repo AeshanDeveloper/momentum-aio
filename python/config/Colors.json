@@ -5,5 +5,6 @@
     "warning": "#F59E0B",
     "warn": "#F59E0B",
     "info": "#0844C5",
-    "cmd_help": "#0844C5"
+    "cmd_help": "#0844C5",
+    "neutral": "#0844C5"
 }

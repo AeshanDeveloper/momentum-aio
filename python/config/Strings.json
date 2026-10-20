@@ -1,0 +1,553 @@
+{
+  "common": {
+    "success": {
+      "title": "{emoji:success} Operation Completed",
+      "description": "{emoji:check} {message}",
+      "style": "success"
+    },
+    "error": {
+      "title": "{emoji:error} Something Went Wrong",
+      "description": "{emoji:cross} {message}",
+      "style": "error"
+    },
+    "denied": {
+      "title": "{emoji:denied} Access Denied",
+      "description": "{emoji:ban} {message}",
+      "style": "error"
+    },
+    "cooldown": {
+      "title": "{emoji:cooldown} Please Slow Down",
+      "description": "{emoji:clock} Cooldown Active: Please wait `{remaining}s` before using `{command}` again.",
+      "style": "warning"
+    },
+    "loading": {
+      "title": "{emoji:loading} Please Wait",
+      "description": "{emoji:loading} {message}",
+      "style": "info"
+    },
+    "not_found": {
+      "title": "{emoji:warning} Not Found",
+      "description": "{emoji:warning} {message}",
+      "style": "warning"
+    },
+    "unexpected_error": {
+      "title": "{emoji:error} Command Execution Error",
+      "description": "An unexpected error occurred while executing `{command}`.\n\n• **Error ID:** `{error_id}`\n• **Summary:** `{error}`\n\n-# Please provide this Error ID to the bot administrator.",
+      "style": "error"
+    },
+    "rate_limit": {
+      "title": "{emoji:cooldown} Rate Limit Exceeded",
+      "description": "{emoji:warning} {message}",
+      "style": "warning"
+    },
+    "invalid_usage": {
+      "title": "{emoji:warning} Invalid Usage",
+      "description": "{emoji:warning} {message}\n\n*Usage:* `{usage}`",
+      "style": "warning"
+    }
+  },
+  "permissions": {
+    "missing_user_permission": {
+      "title": "{emoji:denied} Access Denied",
+      "description": "{emoji:cross} You lack the required permission(s) to execute this command: {permissions}",
+      "style": "error"
+    },
+    "missing_bot_permission": {
+      "title": "{emoji:warning} Bot Missing Permissions",
+      "description": "{emoji:cross} The bot lacks required permission(s) in this channel: {permissions}",
+      "style": "error"
+    },
+    "owner_only": {
+      "title": "{emoji:denied} Access Denied",
+      "description": "{emoji:cross} This command is strictly reserved for the global bot owner.",
+      "style": "error"
+    },
+    "admin_only": {
+      "title": "{emoji:denied} Access Denied",
+      "description": "{emoji:cross} Administrator permission is required to perform this action.",
+      "style": "error"
+    },
+    "blacklisted_user": {
+      "title": "{emoji:denied} Account Restricted",
+      "description": "{emoji:ban} You are blacklisted from executing commands.",
+      "style": "error"
+    },
+    "blacklisted_guild": {
+      "title": "{emoji:denied} Server Restricted",
+      "description": "{emoji:ban} This server is blacklisted from executing commands.",
+      "style": "error"
+    },
+    "guild_only": {
+      "title": "{emoji:warning} Server Only Command",
+      "description": "{emoji:cross} This command can only be used inside a Discord server.",
+      "style": "warning"
+    },
+    "nsfw_only": {
+      "title": "{emoji:warning} Age-Restricted",
+      "description": "{emoji:cross} This command can only be run in Age-Restricted (NSFW) channels.",
+      "style": "warning"
+    },
+    "command_disabled": {
+      "title": "{emoji:warning} Command Disabled in Server",
+      "description": "{emoji:cross} The command `{command}` has been disabled by server administrators.",
+      "style": "warning"
+    }
+  },
+  "antispam": {
+    "warning": {
+      "title": "{emoji:cooldown} High Frequency Activity",
+      "description": "{emoji:warning} Slow down! You are sending commands too quickly ({count}/{max}).",
+      "style": "warning"
+    },
+    "blacklisted": {
+      "title": "{emoji:denied} Anti-Spam Restriction",
+      "description": "{emoji:ban} You have been automatically blacklisted for excessive command spam.",
+      "style": "error"
+    },
+    "blocked": {
+      "title": "{emoji:denied} Message Blocked",
+      "description": "{emoji:ban} Message ignored due to active anti-spam detection.",
+      "style": "error"
+    }
+  },
+  "security": {
+    "blacklist_added": {
+      "title": "{emoji:shield} Global Blacklist Updated",
+      "description": "{emoji:check} Successfully blacklisted {target_type} `{target_id}`. (Expires: {expires})",
+      "style": "success"
+    },
+    "blacklist_removed": {
+      "title": "{emoji:shield} Global Blacklist Updated",
+      "description": "{emoji:check} Successfully removed {target_type} `{target_id}` from the blacklist.",
+      "style": "success"
+    },
+    "blacklist_already": {
+      "title": "{emoji:shield} Already Blacklisted",
+      "description": "{emoji:warning} {target_type} `{target_id}` is already blacklisted.",
+      "style": "warning"
+    },
+    "blacklist_not_found": {
+      "title": "{emoji:shield} Blacklist Query",
+      "description": "{emoji:info} {target_type} `{target_id}` is not currently blacklisted.",
+      "style": "info"
+    },
+    "blacklist_owner_protected": {
+      "title": "{emoji:denied} Action Blocked",
+      "description": "{emoji:cross} Bot owners and excluded users cannot be blacklisted.",
+      "style": "error"
+    },
+    "noprefix_added": {
+      "title": "{emoji:key} No-Prefix Authorized",
+      "description": "{emoji:check} Granted no-prefix authorization to user `{user_id}`. (Expires: {expires})",
+      "style": "success"
+    },
+    "noprefix_removed": {
+      "title": "{emoji:key} No-Prefix Revoked",
+      "description": "{emoji:check} Revoked no-prefix authorization from user `{user_id}`.",
+      "style": "success"
+    },
+    "noprefix_already": {
+      "title": "{emoji:key} No-Prefix Exists",
+      "description": "{emoji:info} User `{user_id}` already has no-prefix authorization.",
+      "style": "info"
+    }
+  },
+  "system": {
+    "booting": "[MomentumOne] The system is booting up... Please wait...",
+    "ready": "[MomentumOne] System core initialized and ready.",
+    "database_connecting": "[MomentumOne] Initializing database...",
+    "database_connected": "[MomentumOne] Connected to database store successfully.",
+    "bot_disabled": "[MomentumOne] Discord bot is disabled in environment settings.",
+    "internal_error": "An internal error occurred. Please try again later.",
+    "unauthorized": "Unauthorized access. Valid token or session required."
+  },
+  "commands": {
+    "ping": {
+      "measuring": {
+        "title": "{emoji:ping} Measuring Latency",
+        "description": "{emoji:loading} Measuring roundtrip, gateway socket, and database responsiveness...",
+        "style": "info"
+      },
+      "status": {
+        "title": "{emoji:ping} Bot Connectivity Status",
+        "description": "• **Status:** {emoji:online} `Online`\n• **Message Roundtrip:** `{roundtrip}ms`\n• **Gateway Heartbeat:** {emoji:latency} `{gateway_ping}`\n• **Database Response:** {emoji:database} `{db_ping}`",
+        "footer": "Metrics represent live cluster & socket health.",
+        "style": "info"
+      }
+    },
+    "help": {
+      "title": "{emoji:help} MomentumOne Control Platform // Help Directory",
+      "description": "Select or enter a command below for full syntax, arguments, permissions, and aliases.",
+      "category_label": "Category // {category}",
+      "command_detail_title": "{emoji:info} Command: {name}",
+      "usage": "• **Usage:** `{usage}`",
+      "aliases": "• **Aliases:** {aliases}",
+      "cooldown": "• **Cooldown:** `{cooldown}s`",
+      "subcommands": "• **Subcommands:**\n{subcommands}",
+      "permissions": "• **Required Permissions:** {permissions}",
+      "not_found": {
+        "title": "{emoji:warning} Command Not Found",
+        "description": "{emoji:cross} Command `{name}` was not found in the registry.",
+        "style": "warning"
+      }
+    },
+    "ai": {
+      "missing_prompt": {
+        "title": "{emoji:warning} Prompt Required",
+        "description": "{emoji:info} Please provide a prompt or question for Gemini.\n\n*Usage:* `$ai <your question>`",
+        "style": "warning"
+      },
+      "no_key": {
+        "title": "{emoji:denied} Gemini AI Not Configured",
+        "description": "{emoji:cross} Please configure `GEMINI_API_KEY` in your environment settings.",
+        "style": "error"
+      },
+      "thinking": {
+        "title": "{emoji:brain} Gemini Intelligence",
+        "description": "{emoji:loading} Analyzing prompt with Google Gemini...",
+        "style": "info"
+      },
+      "success": {
+        "title": "{emoji:sparkles} Google Gemini Intelligence",
+        "description": "**Prompt:** {prompt}\n\n{response}",
+        "footer": "Model: {model}",
+        "style": "info"
+      },
+      "error": {
+        "title": "{emoji:error} AI Generation Error",
+        "description": "{emoji:cross} Failed to generate response: `{error}`",
+        "style": "error"
+      }
+    },
+    "profile": {
+      "title": "{emoji:profile} User Profile: {username}",
+      "discord_id": "• **Discord ID:** `{user_id}`",
+      "created": "• **Account Created:** <t:{timestamp}:R>",
+      "joined": "• **Joined Server:** <t:{timestamp}:R>",
+      "roles": "• **Server Roles:**\n  > {badges}",
+      "footer": "MomentumOne Identity Ledger",
+      "badge_owner": "{emoji:owner} **Bot Developer / Owner**",
+      "badge_role": "{emoji:shield} **{role}**",
+      "badge_blacklisted": "{emoji:ban} **System Blacklisted**"
+    },
+    "server": {
+      "title": "{emoji:server} Server Information: {name}",
+      "footer": "{name} • Server Overview",
+      "id": "• **Server ID:** `{server_id}`",
+      "owner": "• **Owner:** <@{owner_id}>",
+      "created": "• **Created:** <t:{created_sec}:F> (<t:{created_sec}:R>)",
+      "verification": "• **Verification Level:** `{verification_level}`",
+      "members": "• **Total Members:** `{members}`",
+      "roles": "• **Roles:** `{roles_count}`",
+      "channels": "• **Text Channels:** `{text_channels}` • **Voice Channels:** `{voice_channels}`",
+      "boost_level": "• **Boost Level:** `Tier {boost_level}`",
+      "boost_count": "• **Total Boosts:** `{boost_count}`"
+    },
+    "botinfo": {
+      "title": "{emoji:settings} MomentumOne Systems Architecture",
+      "platform": "• **Framework:** Modular Enterprise Engine",
+      "version": "• **Release:** v{version}",
+      "memory": "• **Memory Allocation:** `{memory} MB`",
+      "guilds": "• **Connected Guilds:** `{guild_count}`",
+      "ping": "• **Gateway Socket:** `{ping}ms`",
+      "footer": "MomentumOne Control Platform"
+    },
+    "bug": {
+      "empty": {
+        "title": "{emoji:warning} Description Required",
+        "description": "{emoji:info} Please provide a detailed description of the bug encountered.\n\n*Usage:* `$bug <description of issue>`",
+        "style": "warning"
+      },
+      "submitted": {
+        "title": "{emoji:bug} Bug Report Submitted",
+        "description": "{emoji:check} Thank you for helping improve MomentumOne! Your report has been dispatched to the engineering team.\n\n• **Tracking ID:** `#{report_id}`\n• **Status:** `open`\n• **Submitted By:** <@{user_id}>\n\n**Details Recorded:**\n> {details}",
+        "footer": "MomentumOne Quality Assurance",
+        "style": "success"
+      },
+      "list_title": "{emoji:bug} Recorded Bug Reports ({count})",
+      "empty_list": "No bug reports recorded yet.",
+      "not_found": {
+        "title": "{emoji:error} Bug Report Not Found",
+        "description": "{emoji:cross} No bug report found with ID `#{report_id}`.",
+        "style": "error"
+      },
+      "view_title": "{emoji:bug} Bug Report `#{report_id}`",
+      "footer": "MomentumOne Quality Assurance"
+    },
+    "notifications": {
+      "title": "{emoji:bell} Direct Message Notification Preferences",
+      "status_line": "• **DM Delivery Status:** {status_icon} `{status_text}`",
+      "desc_enabled": "You will receive direct messages when tickets, automated actions, and staff updates are processed.",
+      "desc_disabled": "Direct message alerts are muted. You will not receive private messages from the bot.",
+      "btn_enable": "Enable DMs",
+      "btn_disable": "Disable DMs",
+      "enabled_label": "Enabled",
+      "disabled_label": "Disabled"
+    },
+    "update": {
+      "title": "{emoji:rocket} MomentumOne System Changelog",
+      "release_header": "**Release:** `v{version}` ({codename}) {badge}",
+      "published": "**Published:** `{published}`",
+      "features_heading": "**{emoji:sparkles} Key Capabilities & Features:**",
+      "bugs_heading": "**{emoji:wrench} Bug Fixes & Stability:**",
+      "latest_badge": "{emoji:star} *(Latest)*",
+      "historical_badge": "*(Historical)*",
+      "footer": "Version {version} • Released {released_at}"
+    },
+    "announce": {
+      "missing_text": {
+        "title": "{emoji:warning} Announcement Content Missing",
+        "description": "{emoji:info} Please provide the announcement message content.\n\n*Usage:* `$announce [#channel] <message>`",
+        "style": "warning"
+      },
+      "title": "{emoji:broadcast} Server Announcement",
+      "sent": {
+        "title": "{emoji:success} Announcement Published",
+        "description": "{emoji:check} Announcement successfully published to <#{channel_id}>.",
+        "style": "success"
+      },
+      "footer": "Announced by {author_name}"
+    },
+    "channel": {
+      "locked": {
+        "title": "{emoji:lock} Channel Locked",
+        "description": "{emoji:lock} Channel <#{channel_id}> has been locked.",
+        "style": "warning"
+      },
+      "unlocked": {
+        "title": "{emoji:unlock} Channel Unlocked",
+        "description": "{emoji:unlock} Channel <#{channel_id}> has been unlocked.",
+        "style": "success"
+      },
+      "info_title": "{emoji:chart} Channel Metrics: #{name}",
+      "id": "• **Channel ID:** `{channel_id}`",
+      "type": "• **Type:** `{channel_type}`",
+      "created": "• **Created:** <t:{timestamp}:R>",
+      "footer": "Guild: {guild_name}",
+      "error_lock": {
+        "title": "{emoji:error} Channel Lock Failed",
+        "description": "{emoji:cross} Failed to lock channel: {error}",
+        "style": "error"
+      },
+      "error_unlock": {
+        "title": "{emoji:error} Channel Unlock Failed",
+        "description": "{emoji:cross} Failed to unlock channel: {error}",
+        "style": "error"
+      }
+    },
+    "commandmanage": {
+      "disabled_success": {
+        "title": "{emoji:success} Command Disabled",
+        "description": "{emoji:check} Command `{command}` has been disabled in this server.",
+        "style": "success"
+      },
+      "enabled_success": {
+        "title": "{emoji:success} Command Re-Enabled",
+        "description": "{emoji:check} Command `{command}` has been re-enabled in this server.",
+        "style": "success"
+      },
+      "action_failed": {
+        "title": "{emoji:error} Action Failed",
+        "description": "{emoji:cross} {message}",
+        "style": "error"
+      },
+      "panel_title": "{emoji:settings} Server Command Management — {guild_name}",
+      "panel_desc": "Configure which commands are active in **{guild_name}**.\n\n• **Total Manageable Commands:** `{total_commands}`\n• **Currently Disabled in Server:** `{disabled_commands}`\n• **Page:** `{current_page} of {total_pages}`",
+      "table_heading": "**Command Status Table**",
+      "quick_toggle_heading": "**Quick Toggle Command**\nSelect a command from this page to toggle its enabled/disabled status in this server.",
+      "select_placeholder": "Select command to toggle...",
+      "essential_badge": "{emoji:lock} `ESSENTIAL (Protected)`",
+      "disabled_badge": "{emoji:disabled} `DISABLED`",
+      "enabled_badge": "{emoji:enabled} `ENABLED`",
+      "btn_prev": "Previous",
+      "btn_next": "Next",
+      "btn_reset": "Reset All"
+    },
+    "ticket": {
+      "created": {
+        "title": "{emoji:ticket} Support Ticket Created",
+        "description": "{emoji:check} Your private support channel has been provisioned.\n\n• **Ticket ID:** `#{ticket_id}`\n• **Channel:** <#{channel_id}>\n• **Subject:** `{subject}`\n\n-# Support staff have been alerted to your inquiry.",
+        "style": "success"
+      },
+      "creation_failed": {
+        "title": "{emoji:error} Ticket Creation Failed",
+        "description": "{emoji:cross} Failed to create support ticket: `{error}`",
+        "style": "error"
+      },
+      "closed": {
+        "title": "{emoji:lock} Support Ticket Closed",
+        "description": "{emoji:check} Ticket #{ticket_id} has been resolved and closed.",
+        "style": "warning"
+      },
+      "close_failed": {
+        "title": "{emoji:error} Ticket Close Failed",
+        "description": "{emoji:cross} {error}",
+        "style": "error"
+      },
+      "ticket_not_found": {
+        "title": "{emoji:error} Ticket Not Found",
+        "description": "{emoji:cross} Ticket channel or record was not found.",
+        "style": "error"
+      },
+      "already_closed": {
+        "title": "{emoji:warning} Ticket Already Closed",
+        "description": "{emoji:warning} This ticket is already closed.",
+        "style": "warning"
+      },
+      "list_title": "{emoji:ticket} Support Tickets for {guild_name}",
+      "empty_list": "No active tickets found for this server.",
+      "list_footer": "Showing up to 10 active tickets",
+      "welcome_title": "{emoji:ticket} Support Ticket #{ticket_id}",
+      "welcome_desc": "Welcome <@{creator_id}>! Staff has been notified and will assist you shortly.\n\n• **Subject:** `{subject}`\n• **Type:** `{ticket_type}`\n• **Created:** <t:{created_ts}:R>",
+      "btn_close": "Close Ticket",
+      "close_title": "{emoji:lock} Ticket #{ticket_id} Closed",
+      "close_desc": "This ticket was closed by <@{actor_id}>.\n**Reason:** {reason}\n\nChannel will be deleted in 10 seconds."
+    },
+    "eval": {
+      "missing_code": {
+        "title": "{emoji:warning} Missing Code",
+        "description": "{emoji:cross} Please provide a Python expression or script to evaluate.",
+        "style": "error"
+      },
+      "title_eval": "{emoji:eval} Python Evaluation ({time_ms}ms)",
+      "title_error": "{emoji:error} Evaluation Error ({time_ms}ms)",
+      "footer": "MomentumOne Eval • Execution Time: {time_ms}ms • Confidential"
+    },
+    "say": {
+      "empty": {
+        "title": "{emoji:warning} No Text Provided",
+        "description": "{emoji:info} Please provide text to broadcast.",
+        "style": "warning"
+      },
+      "sent": {
+        "title": "{emoji:success} Message Dispatched",
+        "description": "{emoji:check} Message successfully sent to channel.",
+        "style": "success"
+      }
+    },
+    "reboot": {
+      "prompt_title": "{emoji:loading} Restart MomentumOne System",
+      "prompt_desc": "{emoji:info} This will restart the bot process.\n\nAre you sure you want to proceed?",
+      "prompt_footer": "{bot_name} • Reboot",
+      "btn_confirm": "Confirm Reboot",
+      "btn_cancel": "Cancel",
+      "cancelled_title": "{emoji:info} Reboot Cancelled",
+      "cancelled_desc": "{emoji:check} The reboot sequence was aborted.",
+      "restarting_title": "{emoji:loading} Restarting {bot_name}...",
+      "restarting_desc": "{emoji:info} Hold on, rebooting the bot..."
+    },
+    "reload": {
+      "panel_title": "{emoji:loading} Module Hot-Reload Engine",
+      "panel_desc": "Reload runtime plugins, commands, event handlers, and configurations without process reboot.",
+      "btn_reload_all": "Reload All",
+      "btn_reload_commands": "Reload Commands",
+      "btn_reload_plugins": "Reload Plugins",
+      "btn_reload_configs": "Reload Configs",
+      "success": {
+        "title": "{emoji:success} Hot-Reload Complete",
+        "description": "{emoji:check} Reloaded `{commands_count}` commands and `{plugins_count}` plugins.",
+        "style": "success"
+      },
+      "failed": {
+        "title": "{emoji:error} Reload Failed",
+        "description": "{emoji:cross} {message}",
+        "style": "error"
+      }
+    },
+    "listservers": {
+      "title": "{emoji:globe} Connected Guilds Ledger (Page {page}/{total_pages})",
+      "summary": "• **Total Guilds:** `{count}`\n• **Total Cached Members:** `{members}`\n• **Runtime:** Active",
+      "closed_title": "{emoji:lock} Server List Closed",
+      "closed_desc": "The server directory panel has been dismissed.",
+      "btn_prev": "Previous",
+      "btn_next": "Next",
+      "btn_close": "Close"
+    },
+    "status": {
+      "panel_title": "{emoji:bot} MomentumOne Operational Control Panel",
+      "overview_desc": "**Platform Version:** `v{version}` • **Python:** `{python_version}`\n**Uptime:** `{uptime}` • **Heap:** `{heap_used} MB / {heap_total} MB`\n**Status:** {emoji:enabled} Online & Operational",
+      "conn_heading": "{emoji:server} **Connectivity & Services**",
+      "conn_gateway": "• **Discord Gateway:** `{status}` ({ping})",
+      "conn_guilds": "• **Connected Guilds:** `{guild_count}` ({user_count} cached users)",
+      "conn_db": "• **Database:** {status} ({ping})",
+      "conn_plugins": "• **Active Plugins:** `{plugin_count}` loaded in runtime",
+      "econ_heading": "{emoji:wallet} **Economy & Automation Status**",
+      "econ_lb": "• **Live Leaderboard Scheduler:** {status}",
+      "econ_tickets": "• **Withdrawal Tickets:** `{pending}` pending ({total} lifetime)",
+      "econ_cache": "• **Cache State:** `{balances}` balances, `{guilds}` guilds, `{ranks}` rank caches",
+      "obs_heading": "{emoji:chart} **Observability & Intelligence**",
+      "diag_heading": "{emoji:commands} **Diagnostics & Safety**",
+      "closed_title": "{emoji:lock} Control Panel Closed",
+      "closed_desc": "Operational dashboard session closed.",
+      "btn_refresh": "Refresh",
+      "btn_close": "Close Panel"
+    },
+    "errors": {
+      "title": "{emoji:warning} Error Tracker Diagnostics",
+      "empty": {
+        "title": "{emoji:success} Error Tracker Clean",
+        "description": "{emoji:check} No unhandled command errors recorded.",
+        "style": "success"
+      },
+      "detail_title": "{emoji:error} Error Detail: {error_id}",
+      "btn_prev": "Previous",
+      "btn_next": "Next",
+      "btn_clear": "Clear Errors"
+    },
+    "audit": {
+      "title": "{emoji:audit} System Audit Trail (Page {page}/{total_pages})",
+      "detail_title": "{emoji:audit} Audit Log Inspector",
+      "empty": "No audit records found.",
+      "btn_prev": "Previous",
+      "btn_next": "Next"
+    },
+    "blacklist": {
+      "overview_title": "{emoji:shield} Global Blacklist System",
+      "overview_desc": "Manage persistent global restrictions across the entire bot platform.\n\n• **Active Blacklisted Users:** `{user_count}`\n• **Active Blacklisted Servers:** `{guild_count}`",
+      "user_heading": "User Restrictions",
+      "server_heading": "Server Restrictions",
+      "empty": "No restrictions currently active."
+    },
+    "unblacklist": {
+      "overview_title": "{emoji:shield} Global Unblacklist System",
+      "failed_title": "{emoji:ban} Unblacklist Failed",
+      "failed": {
+        "title": "{emoji:ban} Unblacklist Failed",
+        "description": "{emoji:cross} {error}",
+        "style": "error"
+      }
+    },
+    "noprefix": {
+      "overview_title": "{emoji:key} No-Prefix Authorization System",
+      "overview_desc": "Manage users permitted to execute commands without requiring the `{prefix}` prefix.\n\n• **Total Authorized Users:** `{count}`"
+    },
+    "botprofile": {
+      "title": "{emoji:bot} Bot Profile Management",
+      "restricted": {
+        "title": "{emoji:denied} Access Restricted",
+        "description": "{emoji:cross} This command is strictly restricted to bot owners.",
+        "style": "error"
+      },
+      "usage_title": "{emoji:bot} Bot Profile Syntax",
+      "usage_desc": "**Global profile — changes the bot everywhere**\n`!botprofile global avatar <image URL or attachment>`\n`!botprofile global name <new name>`\n`!botprofile global bio <new bio>`\n\n**Server profile — changes appearance in this server only**\n`!botprofile server avatar <image URL or attachment>`\n`!botprofile server name <new name>`\n\n{emoji:info} Server profile edits require the bot to support the corresponding guild-member profile API.",
+      "updated": {
+        "title": "{emoji:success} Bot Profile Updated",
+        "description": "{emoji:check} Bot presence and profile updated successfully.",
+        "style": "success"
+      },
+      "failed": {
+        "title": "{emoji:error} Bot Profile Update Failed",
+        "description": "{emoji:cross} {message}",
+        "style": "error"
+      }
+    }
+  },
+  "dashboard": {
+    "title": "MomentumOne Control Center",
+    "subtitle": "Enterprise-grade modular platform and control center.",
+    "status_online": "Online",
+    "status_standby": "Standby",
+    "status_offline": "Offline",
+    "db_synced": "Synced"
+  }
+}

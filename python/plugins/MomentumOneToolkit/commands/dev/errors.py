@@ -15,7 +15,7 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize
 )
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
 
 
@@ -86,14 +86,14 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     C = COLORS
 
     emojis = {
-        "error": E.get("error") or "❌",
-        "success": E.get("success") or "✅",
-        "warning": E.get("warning") or "⚠️",
-        "time": E.get("pending") or E.get("loading") or "⏱️",
-        "cmd": E.get("commands") or "⚡",
-        "search": E.get("search") or "🔍",
-        "user": E.get("user") or "👤",
-        "reset": E.get("reset") or "🔄",
+        "error": E.get("error"),
+        "success": E.get("success"),
+        "warning": E.get("warning"),
+        "time": E.get("time") or E.get("pending"),
+        "cmd": E.get("commands") or E.get("cmd"),
+        "search": E.get("search"),
+        "user": E.get("user"),
+        "reset": E.get("reset"),
     }
 
     colors = {
@@ -104,15 +104,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     }
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
-        deny_box = (
-            ContainerBuilder()
-            .set_accent_color(colors["error"])
-            .add_text_display(f"### {emojis['error']} Access Restricted")
-            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-            .add_text_display("This command is strictly restricted to bot owners.")
-            .build()
-        )
-        return await send_response(message, deny_box, ephemeral=True)
+        return await send_ui(message, "permissions.owner_only", ephemeral=True, style="error")
 
 
     sub = args[0].lower() if args else None

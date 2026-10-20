@@ -1,12 +1,11 @@
 import os
 from typing import List, Any
 import discord
-from config.settings import settings, COLORS, EMOJIS
+from config.settings import settings
 from config.strings import get_string
-from sdk.discord.builders import ContainerBuilder
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
+from sdk.discord.builders import build_ui
 from shared.types.command_record import CommandType
-
 
 name = "ai"
 aliases = ["askai", "gemini", "chat"]
@@ -20,21 +19,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     prompt = " ".join(args).strip()
 
     if not prompt:
-        err_msg = "Please provide a prompt or question for Gemini.\n\n*Usage:* `$ai <your question>`"
-        return await send_response(message, err_msg, ephemeral=True)
+        return await send_ui(message, "commands.ai.missing_prompt", ephemeral=True, style="warning")
 
     api_key = settings.GEMINI_API_KEY.strip() or os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
-        no_key = get_string("commands.ai.no_key", "❌ **Gemini AI Not Configured**: Please configure `GEMINI_API_KEY` in your environment settings.")
-        return await send_response(message, no_key, ephemeral=True)
+        return await send_ui(message, "commands.ai.no_key", ephemeral=True, style="error")
 
-    # Defer or indicate thinking
-    thinking_str = get_string("commands.ai.thinking", "🧠 Analyzing prompt with Google Gemini...")
     placeholder = None
     if is_slash and hasattr(message, "response"):
         await message.response.defer()
     elif hasattr(message, "reply"):
-        placeholder = await message.reply(thinking_str)
+        thinking_view = build_ui("commands.ai.thinking", style="info")
+        placeholder = await send_response(message, thinking_view)
 
     try:
         from google import genai
@@ -46,39 +42,29 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         )
         text_out = response.text or "No response generated."
 
-        # Truncate if over Discord embed character limit (4096)
+        # Truncate if over Discord component character limit
         if len(text_out) > 3800:
             text_out = text_out[:3800] + "... (truncated)"
 
-        title = get_string("commands.ai.title", "✨ Google Gemini Intelligence")
-        view = (
-            ContainerBuilder()
-            .set_accent_color(COLORS.get("info", COLORS.get("default", "#0844C5")))
-            .add_text_display(f"### {title}")
-            .add_separator()
-            .add_text_display(f"**Prompt:** {prompt}\n\n{text_out}")
-            .set_footer(f"Model: {model_name}")
-            .build()
+        view = build_ui(
+            "commands.ai.success",
+            variables={"prompt": prompt, "response": text_out, "model": model_name},
+            style="info"
         )
 
-        if placeholder:
-            await placeholder.edit(content=None, view=view)
+        if placeholder and hasattr(placeholder, "edit"):
+            await placeholder.edit(view=view)
         else:
             await send_response(message, view)
 
     except Exception as err:
         err_str = str(err)
-        err_title = get_string("commands.ai.error_title", "❌ AI Generation Error")
-        err_view = (
-            ContainerBuilder()
-            .set_accent_color(COLORS.get("error", "#B21F1F"))
-            .add_text_display(f"### {err_title}")
-            .add_separator()
-            .add_text_display(f"Failed to generate response: `{err_str[:300]}`")
-            .build()
+        err_view = build_ui(
+            "commands.ai.error",
+            variables={"error": err_str[:300]},
+            style="error"
         )
-        if placeholder:
-            await placeholder.edit(content=None, view=err_view)
+        if placeholder and hasattr(placeholder, "edit"):
+            await placeholder.edit(view=err_view)
         else:
             await send_response(message, err_view)
-

@@ -37,6 +37,14 @@ class ButtonBuilder:
         self.callback: Optional[Callable] = None
 
     def set_label(self, label: str) -> ButtonBuilder:
+        if isinstance(label, str):
+            from config.strings import render_string, get_string
+            if "{emoji:" in label:
+                label = render_string(label)
+            elif "." in label and not " " in label:
+                val = get_string(label)
+                if val:
+                    label = val
         self.label = str(label)[:80] if label is not None else None
         return self
 
@@ -64,6 +72,13 @@ class ButtonBuilder:
         return self
 
     def set_emoji(self, emoji: Union[str, discord.PartialEmoji, discord.Emoji]) -> ButtonBuilder:
+        if isinstance(emoji, str):
+            from config.settings import EMOJIS
+            from config.strings import render_string
+            if emoji.startswith("{emoji:") and emoji.endswith("}"):
+                emoji = render_string(emoji)
+            elif emoji in EMOJIS and EMOJIS.get(emoji):
+                emoji = EMOJIS.get(emoji)
         self.emoji = emoji
         return self
 
@@ -122,6 +137,14 @@ class SelectMenuBuilder:
         return self
 
     def set_placeholder(self, text: str) -> SelectMenuBuilder:
+        if isinstance(text, str):
+            from config.strings import render_string, get_string
+            if "{emoji:" in text:
+                text = render_string(text)
+            elif "." in text and not " " in text:
+                val = get_string(text)
+                if val:
+                    text = val
         self.placeholder = str(text)[:150] if text is not None else None
         return self
 
@@ -142,7 +165,6 @@ class SelectMenuBuilder:
         return self
 
     def set_menu_type(self, menu_type: SelectMenuTypes) -> SelectMenuBuilder:
-        """Alias for set_type."""
         return self.set_type(menu_type)
 
     def add_option(
@@ -153,6 +175,18 @@ class SelectMenuBuilder:
         emoji: Optional[Union[str, discord.PartialEmoji, discord.Emoji]] = None,
         default: bool = False,
     ) -> SelectMenuBuilder:
+        from config.settings import EMOJIS
+        from config.strings import render_string
+        if isinstance(emoji, str):
+            if emoji.startswith("{emoji:") and emoji.endswith("}"):
+                emoji = render_string(emoji)
+            elif emoji in EMOJIS and EMOJIS.get(emoji):
+                emoji = EMOJIS.get(emoji)
+        if isinstance(label, str) and "{emoji:" in label:
+            label = render_string(label)
+        if isinstance(description, str) and "{emoji:" in description:
+            description = render_string(description)
+
         self.options.append(
             discord.SelectOption(
                 label=str(label)[:100],
@@ -168,10 +202,6 @@ class SelectMenuBuilder:
         self,
         options: List[Union[discord.SelectOption, Dict[str, Any], str]]
     ) -> SelectMenuBuilder:
-        """
-        Accepts a list of discord.SelectOption, dictionaries (label, value, description, emoji, default),
-        or strings. Validates up to 25 options.
-        """
         self.options = []
         for opt in options:
             if isinstance(opt, discord.SelectOption):
@@ -223,7 +253,6 @@ class SelectMenuBuilder:
             )
         else:
             if not self.options:
-                # Add default option to prevent discord.py ValueError
                 self.add_option(label="No options", value="none")
             item = discord.ui.Select(
                 custom_id=cid,
@@ -283,10 +312,6 @@ class ActionRowBuilder:
 
 
 class ComponentCollector:
-    """
-    Message component interaction collector providing event-based listeners
-    for custom_id interaction callbacks and pagination buttons.
-    """
     def __init__(self, view: ComponentLayoutView, target_message: Any = None, timeout: float = 300.0, filter_func: Optional[Callable] = None):
         self.view = view
         self.target_message = target_message
@@ -307,7 +332,8 @@ class ComponentCollector:
             async def wrapped_global(interaction: discord.Interaction, _comp=comp, _old=old_cb):
                 if self.filter_func and not self.filter_func(interaction):
                     try:
-                        await interaction.response.send_message("❌ You are not authorized to use these controls.", ephemeral=True)
+                        from .response import send_ui
+                        await send_ui(interaction, "permissions.owner_only", ephemeral=True)
                     except Exception:
                         pass
                     return
@@ -334,7 +360,8 @@ class ComponentCollector:
             async def wrapped(interaction: discord.Interaction):
                 if self.filter_func and not self.filter_func(interaction):
                     try:
-                        await interaction.response.send_message("❌ You are not authorized to use these controls.", ephemeral=True)
+                        from .response import send_ui
+                        await send_ui(interaction, "permissions.owner_only", ephemeral=True)
                     except Exception:
                         pass
                     return
@@ -348,12 +375,6 @@ class ComponentCollector:
 
 
 class ComponentLayoutView(discord.ui.LayoutView):
-    """
-    Canonical Discord Components V2 LayoutView.
-    Houses a discord.ui.Container and interactive component action rows.
-    Provides backward-compatibility properties so legacy callers expecting .view
-    or .embed do not crash.
-    """
     def __init__(self, timeout: Optional[float] = 180.0):
         super().__init__(timeout=timeout)
         self._collector: Optional[ComponentCollector] = None
@@ -370,29 +391,18 @@ class ComponentLayoutView(discord.ui.LayoutView):
 
     @property
     def embed(self) -> None:
-        """
-        Returns None to safely handle legacy callers calling `message.reply(embed=built.embed)`.
-        In Discord Components V2, the message is sent via `view=built`.
-        """
         return None
 
     def build(self) -> ComponentLayoutView:
-        """Safe no-op returning self if caller calls .build() on an already-built view."""
         return self
 
     def build_view(self) -> ComponentLayoutView:
-        """Safe no-op returning self if caller calls .build_view() on an already-built view."""
         return self
 
     def to_dict(self) -> Dict[str, Any]:
-        """
-        Safe fallback returning empty dict to prevent AttributeError if
-        a legacy dispatcher incorrectly attempts to serialize the LayoutView as an embed.
-        """
         return {}
 
     def get_interactive_components(self) -> List[Any]:
-        """Returns all buttons, select menus, and interactive items nested inside children."""
         items = []
         for child in self.children:
             if hasattr(child, "children"):
@@ -416,35 +426,37 @@ class ComponentLayoutView(discord.ui.LayoutView):
 
 
 class ContainerBuilder:
-    """
-    Canonical fluent builder for Discord Components V2 containers and LayoutViews.
-    """
     def __init__(self):
-        self._accent_color: Optional[int] = 0xFF7B00
+        self._accent_color: Optional[int] = 0x0844C5
         self._components: List[Any] = []
         self._footer_text: Optional[str] = None
         self._timeout: float = 180.0
 
-    def set_accent_color(self, value: Union[str, int]) -> ContainerBuilder:
+    def set_accent_color(self, value: Union[str, int, discord.Colour]) -> ContainerBuilder:
         if isinstance(value, str):
-            clean = value.strip().removeprefix("#")
+            from config.settings import COLORS
+            if value in COLORS:
+                value = COLORS[value]
+            clean = str(value).strip().removeprefix("#")
             try:
                 self._accent_color = int(clean, 16)
             except ValueError:
-                self._accent_color = 0xFF7B00
+                self._accent_color = 0x0844C5
         elif isinstance(value, int):
             self._accent_color = value
         elif isinstance(value, discord.Colour):
             self._accent_color = value.value
         else:
-            self._accent_color = 0xFF7B00
+            self._accent_color = 0x0844C5
 
         self._accent_color = max(0, min(0xFFFFFF, self._accent_color))
         return self
 
     def add_text_display(self, text: str) -> ContainerBuilder:
         if text is not None and str(text).strip():
-            self._components.append(discord.ui.TextDisplay(str(text).strip()))
+            from config.strings import render_string
+            rendered = render_string(str(text).strip())
+            self._components.append(discord.ui.TextDisplay(rendered))
         return self
 
     def add_separator(
@@ -464,12 +476,19 @@ class ContainerBuilder:
         value: str,
         inline: bool = False,
     ) -> ContainerBuilder:
-        content = f"**{name}**\n{value}"
+        from config.strings import render_string
+        rend_name = render_string(str(name))
+        rend_val = render_string(str(value))
+        content = f"**{rend_name}**\n{rend_val}"
         self._components.append(discord.ui.TextDisplay(content))
         return self
 
     def set_footer(self, text: str, icon_url: Optional[str] = None) -> ContainerBuilder:
-        self._footer_text = text
+        if text:
+            from config.strings import render_string
+            self._footer_text = render_string(str(text))
+        else:
+            self._footer_text = None
         return self
 
     def set_timeout(self, timeout: float) -> ContainerBuilder:
@@ -493,7 +512,6 @@ class ContainerBuilder:
         return self
 
     def build_container(self) -> discord.ui.Container:
-        """Builds and returns the raw discord.ui.Container component."""
         comps = list(self._components)
         if self._footer_text:
             comps.append(discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small))
@@ -505,23 +523,115 @@ class ContainerBuilder:
         )
 
     def build(self) -> ComponentLayoutView:
-        """
-        Builds and returns the canonical ComponentLayoutView ready to send
-        via view= in message.reply / interaction.response.send_message.
-        """
         view = ComponentLayoutView(timeout=self._timeout)
         container = self.build_container()
         view.add_item(container)
         return view
 
     def build_view(self) -> ComponentLayoutView:
-        """Alias for build() ensuring consistent fluent contract."""
         return self.build()
 
 
-# Safety monkey-patches to prevent historical runtime errors across legacy callers:
-# - Container has no attribute build / build_view / embed
-# - LayoutView has no attribute build / build_view / to_dict / embed
+def build_ui(
+    key: Optional[str] = None,
+    *,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    details: Optional[str] = None,
+    footer: Optional[str] = None,
+    style: Optional[str] = None,
+    color: Optional[Union[str, int, discord.Colour]] = None,
+    variables: Optional[Dict[str, Any]] = None,
+    action_rows: Optional[List[Any]] = None,
+    components: Optional[List[Any]] = None,
+    timeout: float = 180.0,
+) -> ComponentLayoutView:
+    from config.strings import get_string_def, render_string
+    from config.settings import COLORS
+
+    node: Any = None
+    if key:
+        node = get_string_def(key)
+
+    def_title = None
+    def_desc = None
+    def_details = None
+    def_footer = None
+    def_style = "default"
+    def_color = None
+
+    if isinstance(node, dict):
+        def_title = node.get("title")
+        def_desc = node.get("description") or node.get("desc")
+        def_details = node.get("details")
+        def_footer = node.get("footer")
+        def_style = node.get("style", "default")
+        def_color = node.get("color")
+    elif isinstance(node, str):
+        def_desc = node
+
+    final_title = title if title is not None else def_title
+    final_desc = description if description is not None else def_desc
+    final_details = details if details is not None else def_details
+    final_footer = footer if footer is not None else def_footer
+    final_style = (style or def_style or "default").lower().strip()
+
+    vars_dict = dict(variables or {})
+
+    res_title = render_string(final_title, vars_dict) if final_title else None
+    res_desc = render_string(final_desc, vars_dict) if final_desc else None
+    res_details = render_string(final_details, vars_dict) if final_details else None
+    res_footer = render_string(final_footer, vars_dict) if final_footer else None
+
+    # Resolve accent color
+    accent_val = color or def_color
+    if accent_val is None:
+        style_color_key = {
+            "success": "success",
+            "error": "error",
+            "danger": "error",
+            "warning": "warning",
+            "warn": "warning",
+            "info": "info",
+            "default": "default",
+            "neutral": "neutral",
+        }.get(final_style, "default")
+        accent_val = COLORS.get(style_color_key, COLORS.get("default", "#0844C5"))
+
+    builder = ContainerBuilder().set_accent_color(accent_val).set_timeout(timeout)
+
+    if res_title:
+        builder.add_text_display(f"### {res_title}")
+        if res_desc or res_details:
+            builder.add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+
+    if res_desc:
+        builder.add_text_display(res_desc)
+
+    if res_details:
+        builder.add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        builder.add_text_display(res_details)
+
+    if res_footer:
+        builder.set_footer(res_footer)
+
+    if action_rows:
+        for r in action_rows:
+            builder.add_action_row(r)
+
+    if components:
+        for c in components:
+            if isinstance(c, (ActionRowBuilder, discord.ui.ActionRow)):
+                builder.add_action_row(c)
+            elif isinstance(c, (ButtonBuilder, discord.ui.Button)):
+                builder.add_action_row(lambda row: row.add_button(c))
+            elif isinstance(c, (SelectMenuBuilder, discord.ui.Select, discord.ui.UserSelect, discord.ui.RoleSelect, discord.ui.ChannelSelect)):
+                builder.add_action_row(lambda row: row.add_select_menu(c))
+
+    return builder.build()
+
+
+# Monkey-patches
 if not hasattr(discord.ui.Container, "build"):
     def _container_build_patch(self) -> ComponentLayoutView:
         v = ComponentLayoutView()
@@ -546,4 +656,3 @@ if not hasattr(discord.ui.LayoutView, "to_dict"):
 
 if not hasattr(discord.ui.LayoutView, "embed"):
     discord.ui.LayoutView.embed = property(lambda self: None)
-

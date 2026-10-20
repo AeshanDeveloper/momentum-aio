@@ -9,7 +9,7 @@ CHANGELOG_RELEASES: List[Dict[str, Any]] = [
         "summary": "Full interactive Discord component parity with fluid containers, pagination collectors, and server command quick-toggling.",
         "features": [
             "Interactive ContainerBuilder SDK: Action rows, button builders, select menus, and message component collectors.",
-            "Dynamic Help Browser: 4-button pagination (⏮️, ◀️, ▶️, ⏭️), category views, and fuzzy search suggestions.",
+            "Dynamic Help Browser: 4-button pagination ({emoji:first}, {emoji:previous}, {emoji:next}, {emoji:last}), category views, and fuzzy search suggestions.",
             "Command Management Panel: Server-level command status tables and quick toggle select menus.",
             "Dashboard Multi-Server Sync: Live server selector, invite link generator, and admin auth session handling."
         ],
