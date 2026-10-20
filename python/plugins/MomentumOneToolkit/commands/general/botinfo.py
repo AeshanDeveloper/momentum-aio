@@ -6,6 +6,7 @@ import discord
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from sdk.discord.builders import ContainerBuilder
+from sdk.discord.response import send_response
 from shared.types.command_record import CommandType
 
 name = "botinfo"
@@ -36,7 +37,7 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     guilds_str = get_string("commands.botinfo.guilds", "• **Connected Guilds:** `{guild_count}`", guild_count=guild_count)
     ping_str = get_string("commands.botinfo.ping", "• **Gateway Socket:** `{ping}ms`", ping=ping)
 
-    embed = (
+    view = (
         ContainerBuilder()
         .set_accent_color(COLORS.get("default", "#FF7B00"))
         .add_text_display(f"### ⚙️ {title}")
@@ -46,9 +47,4 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         .build()
     )
 
-    if is_slash and hasattr(message, "response"):
-        await message.response.send_message(embed=embed)
-    elif hasattr(message, "reply"):
-        await message.reply(embed=embed)
-    elif hasattr(message, "channel"):
-        await message.channel.send(embed=embed)
+    return await send_response(message, view)

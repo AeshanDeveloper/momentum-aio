@@ -1,41 +1,117 @@
 from typing import List, Any
+import discord
+from discord import ButtonStyle
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
-from config.changelog import get_latest_release
-from sdk.discord.builders import ContainerBuilder
+from config.changelog import CHANGELOG_RELEASES
+from sdk.discord.builders import (
+    ContainerBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    SeparatorSpacingSize,
+)
+from sdk.discord.response import send_response
 from shared.types.command_record import CommandType
 
 name = "update"
-aliases = ["changelog", "news"]
-description = "View the latest MomentumOne system changelog and release notes."
+aliases = ["changelog", "news", "updates"]
+description = "View the latest MomentumOne system changelog and interactive release notes."
 category = "General"
-usage = "update"
-cooldown = 5.0
+usage = "update [version]"
+cooldown = 3.0
+
+def build_release_view(release_idx: int, session_id: str) -> Any:
+    idx = max(0, min(len(CHANGELOG_RELEASES) - 1, release_idx))
+    rel = CHANGELOG_RELEASES[idx]
+    is_latest = (idx == 0)
+
+    title = get_string("commands.update.title", "🚀 MomentumOne System Changelog")
+    features_formatted = "\n".join(f"• {f}" for f in rel.get("features", []))
+    bug_fixes = rel.get("bugFixes", [])
+    bugs_formatted = "\n".join(f"• {b}" for b in bug_fixes) if bug_fixes else None
+
+    container = (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("default", "#FF7B00"))
+        .add_text_display(f"### {title} — v{rel['version']}")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(
+            f"**Release:** `v{rel['version']}` ({rel['codename']}) {'⭐ *(Latest)*' if is_latest else '*(Historical)*'}\n"
+            f"**Published:** `{rel.get('releasedAt', 'Recent')}`\n\n"
+            f"_{rel.get('headline', '')}_\n\n"
+            f"{rel.get('summary', '')}"
+        )
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(f"**✨ Key Capabilities & Features:**\n{features_formatted}")
+    )
+
+    if bugs_formatted:
+        container.add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        container.add_text_display(f"**🛠️ Bug Fixes & Stability:**\n{bugs_formatted}")
+
+    container.set_footer(f"Version {rel['version']} • Released {rel.get('releasedAt')}")
+
+    row = ActionRowBuilder()
+    row.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"{session_id}:ver:0")
+        .set_label(f"v{CHANGELOG_RELEASES[0]['version']} (Latest)")
+        .set_style(ButtonStyle.primary if idx == 0 else ButtonStyle.secondary)
+        .set_disabled(idx == 0)
+    )
+    if len(CHANGELOG_RELEASES) > 1:
+        row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"{session_id}:ver:1")
+            .set_label(f"v{CHANGELOG_RELEASES[1]['version']}")
+            .set_style(ButtonStyle.primary if idx == 1 else ButtonStyle.secondary)
+            .set_disabled(idx == 1)
+        )
+    if len(CHANGELOG_RELEASES) > 2:
+        row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"{session_id}:ver:2")
+            .set_label(f"v{CHANGELOG_RELEASES[2]['version']}")
+            .set_style(ButtonStyle.primary if idx == 2 else ButtonStyle.secondary)
+            .set_disabled(idx == 2)
+        )
+
+    container.add_action_row(row)
+    return container.build()
 
 async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     is_slash = (command_type == CommandType.SLASH)
-    latest = get_latest_release()
+    author = getattr(message, "user", None) if is_slash else getattr(message, "author", None)
+    author_id = getattr(author, "id", None)
 
-    title = get_string("commands.update.title", "🚀 MomentumOne System Changelog")
-    version_label = get_string("commands.update.latest_version", "Latest Release: v{version}", version=latest["version"])
+    # Check if specific version requested in args
+    current_idx = 0
+    if args:
+        req = args[0].lower().lstrip("v")
+        for i, r in enumerate(CHANGELOG_RELEASES):
+            if r["version"].lstrip("v").startswith(req):
+                current_idx = i
+                break
 
-    features_formatted = "\n".join(f"• {f}" for f in latest["features"])
+    session_id = f"upd_{id(message)}"
+    view = build_release_view(current_idx, session_id)
+    reply_msg = await send_response(message, view)
 
-    embed = (
-        ContainerBuilder()
-        .set_accent_color(COLORS.get("default", "#FF7B00"))
-        .add_text_display(f"### {title}")
-        .add_separator()
-        .add_text_display(
-            f"**{version_label} — {latest['codename']}**\n"
-            f"_{latest['headline']}_\n\n"
-            f"**Key Capabilities:**\n{features_formatted}"
-        )
-        .set_footer(f"Released: {latest['releasedAt']}")
-        .build()
+    collector = view.create_message_component_collector(
+        target_message=reply_msg or message,
+        timeout=180.0,
+        filter_func=lambda inter: (getattr(getattr(inter, "user", None), "id", None) == author_id) if author_id else True,
     )
 
-    if is_slash and hasattr(message, "response"):
-        await message.response.send_message(embed=embed)
-    elif hasattr(message, "reply"):
-        await message.reply(embed=embed)
+    if collector:
+        async def on_ver(inter: discord.Interaction):
+            cid = getattr(getattr(inter, "data", None), "get", lambda k, d=None: None)("custom_id", "")
+            parts = cid.split(":")
+            if len(parts) >= 3 and parts[2].isdigit():
+                new_idx = int(parts[2])
+                updated_view = build_release_view(new_idx, session_id)
+                if hasattr(inter, "response"):
+                    await inter.response.edit_message(view=updated_view.view)
+
+        collector.on(f"{session_id}:ver", on_ver)
+

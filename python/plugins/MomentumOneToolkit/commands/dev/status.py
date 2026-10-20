@@ -18,6 +18,7 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SeparatorSpacingSize
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 VERSION = "26.7.20"
@@ -282,11 +283,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display("This operational control panel is strictly restricted to authorized bot owners.")
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=deny_container.embed, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=deny_container.embed)
-        return
+        return await send_response(message, deny_container, ephemeral=True)
 
     current_view = "overview"
     action_prefix = f"ops_{author_id}_{id(message)}"
@@ -310,11 +307,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         return built_container
 
     initial = await render_panel(current_view)
-    reply_msg = None
-    if is_slash and hasattr(message, "response") and not message.response.is_done():
-        reply_msg = await message.response.send_message(embed=initial.embed, view=initial.view)
-    elif hasattr(message, "reply"):
-        reply_msg = await message.reply(embed=initial.embed, view=initial.view)
+    reply_msg = await send_response(message, initial)
 
     target_msg = reply_msg or message
     collector = initial.create_message_component_collector(
@@ -337,17 +330,17 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                 current_view = target
                 updated = await render_panel(current_view)
                 if hasattr(inter, "response"):
-                    await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                    await inter.response.edit_message(view=updated.view)
             elif action_type == "act":
                 if target == "refresh":
                     updated = await render_panel(current_view)
                     if hasattr(inter, "response"):
-                        await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                        await inter.response.edit_message(view=updated.view)
                 elif target == "clear_caches":
                     current_view = "caches"
                     updated = await render_panel("caches")
                     if hasattr(inter, "response"):
-                        await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                        await inter.response.edit_message(view=updated.view)
                 elif target == "close":
                     closed_box = (
                         ContainerBuilder()
@@ -357,6 +350,6 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                         .build()
                     )
                     if hasattr(inter, "response"):
-                        await inter.response.edit_message(embed=closed_box.embed, view=None)
+                        await inter.response.edit_message(view=closed_box.view)
 
-        collector.on(re.compile(rf"^{action_prefix}:"), on_action)
+        collector.on(f"{action_prefix}:", on_action)

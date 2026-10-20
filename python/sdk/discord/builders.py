@@ -141,6 +141,10 @@ class SelectMenuBuilder:
         self.menu_type = menu_type
         return self
 
+    def set_menu_type(self, menu_type: SelectMenuTypes) -> SelectMenuBuilder:
+        """Alias for set_type."""
+        return self.set_type(menu_type)
+
     def add_option(
         self,
         label: str,
@@ -162,11 +166,11 @@ class SelectMenuBuilder:
 
     def set_options(
         self,
-        options: List[Union[discord.SelectOption, Dict[str, Any]]]
+        options: List[Union[discord.SelectOption, Dict[str, Any], str]]
     ) -> SelectMenuBuilder:
         """
-        Accepts a list of discord.SelectOption or dictionaries with keys:
-        label, value, description, emoji, default.
+        Accepts a list of discord.SelectOption, dictionaries (label, value, description, emoji, default),
+        or strings. Validates up to 25 options.
         """
         self.options = []
         for opt in options:
@@ -174,12 +178,14 @@ class SelectMenuBuilder:
                 self.options.append(opt)
             elif isinstance(opt, dict):
                 self.add_option(
-                    label=opt.get("label", "Option"),
-                    value=opt.get("value", opt.get("label", "option")),
-                    description=opt.get("description"),
+                    label=str(opt.get("label", "Option")),
+                    value=str(opt.get("value", opt.get("label", "option"))),
+                    description=str(opt.get("description")) if opt.get("description") else None,
                     emoji=opt.get("emoji"),
-                    default=opt.get("default", False),
+                    default=bool(opt.get("default", False)),
                 )
+            elif isinstance(opt, (list, tuple)) and len(opt) >= 2:
+                self.add_option(label=str(opt[0]), value=str(opt[1]))
             else:
                 self.add_option(label=str(opt), value=str(opt))
         return self
@@ -311,7 +317,19 @@ class ComponentCollector:
             comp.callback = wrapped_global
         return self
 
-    def _wire_component(self, custom_id: str, callback: Callable) -> None:
+    def _is_match(self, cid: str, target: Any) -> bool:
+        if hasattr(target, "match"):
+            return bool(target.match(cid)) or bool(getattr(target, "search", lambda s: False)(cid))
+        s_target = str(target)
+        return cid == s_target or cid.startswith(f"{s_target}:") or s_target.startswith(f"{cid}:")
+
+    def _rewire_all(self) -> None:
+        if self.global_handler:
+            self.on_interaction(self.global_handler)
+        for target, handler in self.handlers.items():
+            self._wire_component(target, handler)
+
+    def _wire_component(self, custom_id: Any, callback: Callable) -> None:
         def make_cb(cb, expected_id):
             async def wrapped(interaction: discord.Interaction):
                 if self.filter_func and not self.filter_func(interaction):
@@ -325,7 +343,7 @@ class ComponentCollector:
 
         for comp in self.view.get_interactive_components():
             cid = getattr(comp, "custom_id", None)
-            if cid and (cid == custom_id or cid.startswith(f"{custom_id}:") or custom_id.startswith(f"{cid}:")):
+            if cid and self._is_match(cid, custom_id):
                 comp.callback = make_cb(callback, cid)
 
 
@@ -339,6 +357,12 @@ class ComponentLayoutView(discord.ui.LayoutView):
     def __init__(self, timeout: Optional[float] = 180.0):
         super().__init__(timeout=timeout)
         self._collector: Optional[ComponentCollector] = None
+
+    def add_item(self, item: Any) -> ComponentLayoutView:
+        super().add_item(item)
+        if self._collector:
+            self._collector._rewire_all()
+        return self
 
     @property
     def view(self) -> ComponentLayoutView:
@@ -493,3 +517,33 @@ class ContainerBuilder:
     def build_view(self) -> ComponentLayoutView:
         """Alias for build() ensuring consistent fluent contract."""
         return self.build()
+
+
+# Safety monkey-patches to prevent historical runtime errors across legacy callers:
+# - Container has no attribute build / build_view / embed
+# - LayoutView has no attribute build / build_view / to_dict / embed
+if not hasattr(discord.ui.Container, "build"):
+    def _container_build_patch(self) -> ComponentLayoutView:
+        v = ComponentLayoutView()
+        v.add_item(self)
+        return v
+    discord.ui.Container.build = _container_build_patch
+
+if not hasattr(discord.ui.Container, "build_view"):
+    discord.ui.Container.build_view = discord.ui.Container.build
+
+if not hasattr(discord.ui.Container, "embed"):
+    discord.ui.Container.embed = property(lambda self: None)
+
+if not hasattr(discord.ui.LayoutView, "build"):
+    discord.ui.LayoutView.build = lambda self: self
+
+if not hasattr(discord.ui.LayoutView, "build_view"):
+    discord.ui.LayoutView.build_view = lambda self: self
+
+if not hasattr(discord.ui.LayoutView, "to_dict"):
+    discord.ui.LayoutView.to_dict = lambda self: {}
+
+if not hasattr(discord.ui.LayoutView, "embed"):
+    discord.ui.LayoutView.embed = property(lambda self: None)
+

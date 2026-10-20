@@ -4,7 +4,7 @@ import time
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from core.security.blacklist import BlacklistManager, parse_duration_str
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
@@ -16,6 +16,7 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize,
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 name = "blacklist"
@@ -50,16 +51,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     author = getattr(message, "user", None) if is_slash else getattr(message, "author", None)
     author_id = str(author.id) if author else ""
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
         denied_msg = "❌ **Access Denied**: This command is restricted to the bot owner."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(denied_msg, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(denied_msg)
-        return
+        return await send_response(message, denied_msg, ephemeral=True)
 
     E = EMOJIS
     C = COLORS
@@ -92,10 +88,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display(description)
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=box.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=box.embed)
+        return await send_response(message, box)
 
     sub = args[0].lower() if args else None
 
@@ -151,11 +144,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         container.add_action_row(ActionRowBuilder().add_select_menu(menu))
 
         built = container.build()
-        reply_msg = None
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            reply_msg = await message.response.send_message(embed=built.embed, view=built.view)
-        elif hasattr(message, "reply"):
-            reply_msg = await message.reply(embed=built.embed, view=built.view)
+        reply_msg = await send_response(message, built)
 
         view_page = 0
         VIEW_PAGE_SIZE = 10
@@ -234,16 +223,16 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                     view_page = 0
                     b_cont, view_page = await render_view_container("user", 0)
                     if hasattr(inter, "response"):
-                        await inter.response.edit_message(embed=b_cont.embed, view=b_cont.view)
+                        await inter.response.edit_message(view=b_cont.view)
                 elif val == "view_servers":
                     view_page = 0
                     b_cont, view_page = await render_view_container("guild", 0)
                     if hasattr(inter, "response"):
-                        await inter.response.edit_message(embed=b_cont.embed, view=b_cont.view)
+                        await inter.response.edit_message(view=b_cont.view)
 
             async def on_back(inter):
                 if hasattr(inter, "response"):
-                    await inter.response.edit_message(embed=built.embed, view=built.view)
+                    await inter.response.edit_message(view=built.view)
 
             async def on_prev(inter):
                 nonlocal view_page
@@ -251,7 +240,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                 t_type = "user" if "user" in getattr(inter, "data", {}).get("custom_id", "") else "guild"
                 b_cont, view_page = await render_view_container(t_type, view_page)
                 if hasattr(inter, "response"):
-                    await inter.response.edit_message(embed=b_cont.embed, view=b_cont.view)
+                    await inter.response.edit_message(view=b_cont.view)
 
             async def on_next(inter):
                 nonlocal view_page
@@ -259,7 +248,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                 t_type = "user" if "user" in getattr(inter, "data", {}).get("custom_id", "") else "guild"
                 b_cont, view_page = await render_view_container(t_type, view_page)
                 if hasattr(inter, "response"):
-                    await inter.response.edit_message(embed=b_cont.embed, view=b_cont.view)
+                    await inter.response.edit_message(view=b_cont.view)
 
             collector.on(menu_id, on_menu_change)
             collector.on(f"{menu_id}:back", on_back)
@@ -384,11 +373,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             return box.build()
 
         first_built = build_list_page(safe_page)
-        list_msg = None
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            list_msg = await message.response.send_message(embed=first_built.embed, view=first_built.view)
-        elif hasattr(message, "reply"):
-            list_msg = await message.reply(embed=first_built.embed, view=first_built.view)
+        list_msg = await send_response(message, first_built)
 
         if total_pages > 1:
             col = first_built.create_message_component_collector(
@@ -402,14 +387,14 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                     safe_page = max(1, safe_page - 1)
                     new_b = build_list_page(safe_page)
                     if hasattr(inter, "response"):
-                        await inter.response.edit_message(embed=new_b.embed, view=new_b.view)
+                        await inter.response.edit_message(view=new_b.view)
 
                 async def sub_next(inter):
                     nonlocal safe_page
                     safe_page = min(total_pages, safe_page + 1)
                     new_b = build_list_page(safe_page)
                     if hasattr(inter, "response"):
-                        await inter.response.edit_message(embed=new_b.embed, view=new_b.view)
+                        await inter.response.edit_message(view=new_b.view)
 
                 col.on(f"bl_sub_prev_{id(message)}", sub_prev)
                 col.on(f"bl_sub_next_{id(message)}", sub_next)

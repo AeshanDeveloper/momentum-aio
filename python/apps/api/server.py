@@ -132,6 +132,18 @@ class ApiServer:
     async def start(self) -> None:
         runner = web.AppRunner(self.app)
         await runner.setup()
-        site = web.TCPSite(runner, host="0.0.0.0", port=3000)
-        await site.start()
-        logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://0.0.0.0:3000")
+        port = int(os.getenv("API_PORT", os.getenv("PORT", 3000)))
+        host = settings.HOST
+        try:
+            site = web.TCPSite(runner, host=host, port=port)
+            await site.start()
+            logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://{host}:{port}")
+        except OSError as e:
+            if e.errno == 98 or "address already in use" in str(e).lower():
+                alt_port = 3001 if port == 3000 else port + 1
+                logger.warn(f"[Server] Port {port} in use, falling back to port {alt_port}")
+                site = web.TCPSite(runner, host=host, port=alt_port)
+                await site.start()
+                logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://{host}:{alt_port}")
+            else:
+                raise

@@ -15,6 +15,7 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize,
 )
+from sdk.discord.response import send_response
 
 from discord import MessageFlags, ButtonStyle
 
@@ -44,11 +45,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
 
     if not guild:
         text = "❌ This command can only be used inside a Discord server."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(text, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(text)
-        return
+        return await send_response(message, text, ephemeral=True)
 
     user = getattr(message, "author", None) or getattr(message, "user", None)
     member = getattr(message, "member", None) or (await guild.fetch_member(user.id) if user and hasattr(guild, "fetch_member") else None)
@@ -74,11 +71,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display("You need **Manage Server** or **Administrator** permissions to manage server commands.")
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=deny_box.embed, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=deny_box.embed)
-        return
+        return await send_response(message, deny_box, ephemeral=True)
 
     subcommand = args[0].lower() if args else None
     target_cmd = args[1].lower() if len(args) > 1 else None
@@ -94,11 +87,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display(result.get("message", ""))
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=box.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=box.embed)
-        return
+        return await send_response(message, box)
 
     if subcommand == "enable" and target_cmd:
         result = ServerCommandManager.enable_command(str(guild.id), target_cmd, str(user.id) if user else None)
@@ -110,11 +99,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display(result.get("message", ""))
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=box.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=box.embed)
-        return
+        return await send_response(message, box)
 
     # Interactive Panel with Pagination & Select Menu
     page = 0
@@ -229,13 +214,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         return container.build(), safe_page, total_pages
 
     built, page, total_pages = await render_panel(page)
-
-    view = built.view
-    reply_msg = None
-    if is_slash and hasattr(message, "response") and not message.response.is_done():
-        reply_msg = await message.response.send_message(embed=built.embed, view=view)
-    elif hasattr(message, "reply"):
-        reply_msg = await message.reply(embed=built.embed, view=view)
+    reply_msg = await send_response(message, built)
 
     target_msg = reply_msg or message
     collector = built.create_message_component_collector(
@@ -250,7 +229,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             page = max(0, page - 1)
             updated, page, _ = await render_panel(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated.view)
 
         async def on_next(inter):
             nonlocal page
@@ -260,12 +239,12 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                 page += 1
             updated, page, _ = await render_panel(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated.view)
 
         async def on_refresh(inter):
             updated, page_val, _ = await render_panel(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated.view)
 
         async def on_toggle(inter):
             values = getattr(getattr(inter, "data", None), "get", lambda k, d=None: None)("values", [])
@@ -279,7 +258,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                     ServerCommandManager.disable_command(str(guild.id), selected_cmd, str(user.id) if user else None)
             updated, page_val, _ = await render_panel(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated.view)
 
         collector.on(f"{prefix}:prev", on_prev)
         collector.on(f"{prefix}:next", on_next)

@@ -2,12 +2,13 @@ from typing import List, Any
 import discord
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
-from sdk.discord.builders import ContainerBuilder
+from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
+from sdk.discord.response import send_response
 from shared.types.command_record import CommandType
 
 name = "server"
 aliases = ["serverinfo", "guildinfo", "guild"]
-description = "Display server metrics, channel statistics, and role allocation."
+description = "Display detailed statistics and information about the server."
 category = "General"
 usage = "server"
 cooldown = 5.0
@@ -19,31 +20,53 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
 
     if not guild:
         err = get_string("permissions.guild_only", "❌ This command can only be used inside a Discord server.")
-        if is_slash and hasattr(message, "response"):
-            await message.response.send_message(err, ephemeral=True)
-        elif hasattr(message, "reply"):
-            await message.reply(err)
-        return
+        return await send_response(message, err, ephemeral=True)
 
-    title = get_string("commands.server.title", "Server Overview: {name}", name=guild.name)
-    id_str = get_string("commands.server.id", "• **Server ID:** `{server_id}`", server_id=guild.id)
-    owner_str = get_string("commands.server.owner", "• **Server Owner:** <@{owner_id}>", owner_id=guild.owner_id or "Unknown")
-    members_str = get_string("commands.server.members", "• **Members:** `{member_count}` total", member_count=guild.member_count or len(guild.members))
-    channels_str = get_string("commands.server.channels", "• **Channels:** `{channel_count}` text/voice", channel_count=len(guild.channels))
-    roles_str = get_string("commands.server.roles", "• **Roles:** `{role_count}` configured", role_count=len(guild.roles))
+    created_sec = int(guild.created_at.timestamp()) if hasattr(guild, "created_at") else 0
+    members = getattr(guild, "member_count", None) or len(guild.members) if hasattr(guild, "members") else 1
+    roles_count = len(guild.roles) if hasattr(guild, "roles") else 1
 
-    embed = (
+    text_channels = 0
+    voice_channels = 0
+    if hasattr(guild, "channels"):
+        for ch in guild.channels:
+            if isinstance(ch, discord.TextChannel):
+                text_channels += 1
+            elif isinstance(ch, discord.VoiceChannel):
+                voice_channels += 1
+
+    boost_level = getattr(guild, "premium_tier", 0)
+    boost_count = getattr(guild, "premium_subscription_count", 0) or 0
+    desc = getattr(guild, "description", None) or f"Welcome to **{guild.name}**!"
+
+    view = (
         ContainerBuilder()
-        .set_accent_color(COLORS.get("default", "#FF7B00"))
-        .add_text_display(f"### 🌐 {title}")
-        .add_separator()
-        .add_text_display(f"{id_str}\n{owner_str}\n{members_str}\n{channels_str}\n{roles_str}")
+        .set_accent_color(COLORS.get("default", "#3B82F6"))
+        .add_text_display(f"### 🌐 Server Information: {guild.name}")
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(
+            f"**General**\n"
+            f"• **Server ID:** `{guild.id}`\n"
+            f"• **Owner:** <@{guild.owner_id}>\n"
+            f"• **Created:** <t:{created_sec}:F> (<t:{created_sec}:R>)\n"
+            f"• **Verification Level:** `{str(guild.verification_level).title()}`"
+        )
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(
+            f"**Members & Channels**\n"
+            f"• **Total Members:** `{members:,}`\n"
+            f"• **Roles:** `{roles_count}`\n"
+            f"• **Text Channels:** `{text_channels}` • **Voice Channels:** `{voice_channels}`"
+        )
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(
+            f"**Server Boost Status**\n"
+            f"• **Boost Level:** `Tier {boost_level}`\n"
+            f"• **Total Boosts:** `{boost_count}`"
+        )
+        .set_footer(f"{guild.name} • Server Overview")
         .build()
     )
 
-    if is_slash and hasattr(message, "response"):
-        await message.response.send_message(embed=embed)
-    elif hasattr(message, "reply"):
-        await message.reply(embed=embed)
-    elif hasattr(message, "channel"):
-        await message.channel.send(embed=embed)
+    return await send_response(message, view)

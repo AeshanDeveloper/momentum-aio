@@ -6,6 +6,7 @@ from core.logging.logger import logger
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from sdk.discord.builders import ContainerBuilder, ActionRowBuilder, ButtonBuilder
+from sdk.discord.response import send_response
 from .types import TicketRecord, TicketGuildConfig, TicketStatus, TicketType
 
 class TicketManager:
@@ -103,7 +104,7 @@ class TicketManager:
         await col.insert_one(record)
 
         # Send welcome panel inside ticket channel
-        welcome_embed = (
+        welcome_view = (
             ContainerBuilder()
             .set_accent_color(COLORS.get("default", "#FF7B00"))
             .add_text_display(f"### {EMOJIS.get('ticket', '🎫')} Support Ticket #{counter}")
@@ -123,14 +124,8 @@ class TicketManager:
             )
             .build()
         )
-        row_view = ActionRowBuilder().add_button(
-            lambda btn: btn.set_label("Close Ticket")
-            .set_custom_id(f"ticket_close_{channel.id}")
-            .set_style("danger")
-            .set_emoji("🔒")
-        ).build()
 
-        await channel.send(embed=welcome_embed, view=row_view)
+        await send_response(channel, welcome_view)
         return {"success": True, "ticket_id": counter, "channel_id": str(channel.id)}
 
     @classmethod
@@ -174,7 +169,7 @@ class TicketManager:
         if cid in cls._tickets_cache:
             cls._tickets_cache[cid].update(updates)
 
-        close_embed = (
+        close_view = (
             ContainerBuilder()
             .set_accent_color(COLORS.get("warn", "#F59E0B"))
             .add_text_display(f"### 🔒 Ticket #{record.get('ticket_id')} Closed")
@@ -185,7 +180,7 @@ class TicketManager:
             )
             .build()
         )
-        await channel.send(embed=close_embed)
+        await send_response(channel, close_view)
 
         async def _delete_after():
             import asyncio

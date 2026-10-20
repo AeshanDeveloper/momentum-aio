@@ -191,7 +191,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
 
             new_b, page, _ = build_server_list_container(client, page, query)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=new_b.embed, view=new_b.view)
+                await inter.response.edit_message(view=new_b.view)
 
         collector.on("listservers:close", on_action)
         import re

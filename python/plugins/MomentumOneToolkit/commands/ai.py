@@ -20,21 +20,13 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     prompt = " ".join(args).strip()
 
     if not prompt:
-        err_msg = "Please provide a prompt or question for Gemini."
-        if is_slash and hasattr(message, "response"):
-            await message.response.send_message(err_msg, ephemeral=True)
-        elif hasattr(message, "reply"):
-            await message.reply(err_msg)
-        return
+        err_msg = "Please provide a prompt or question for Gemini.\n\n*Usage:* `$ai <your question>`"
+        return await send_response(message, err_msg, ephemeral=True)
 
     api_key = settings.GEMINI_API_KEY.strip() or os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         no_key = get_string("commands.ai.no_key", "❌ **Gemini AI Not Configured**: Please configure `GEMINI_API_KEY` in your environment settings.")
-        if is_slash and hasattr(message, "response"):
-            await message.response.send_message(no_key, ephemeral=True)
-        elif hasattr(message, "reply"):
-            await message.reply(no_key)
-        return
+        return await send_response(message, no_key, ephemeral=True)
 
     # Defer or indicate thinking
     thinking_str = get_string("commands.ai.thinking", "🧠 Analyzing prompt with Google Gemini...")

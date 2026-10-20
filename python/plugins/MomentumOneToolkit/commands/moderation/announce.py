@@ -3,6 +3,7 @@ import discord
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from sdk.discord.builders import ContainerBuilder
+from sdk.discord.response import send_response
 from apps.bot.discord.permissions.permission import Permissions
 from shared.types.command_record import CommandType
 
@@ -31,28 +32,21 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         announcement_text = " ".join(args).strip()
 
     if not announcement_text:
-        err = "Please provide the announcement message content."
-        if is_slash and hasattr(message, "response"):
-            await message.response.send_message(err, ephemeral=True)
-        elif hasattr(message, "reply"):
-            await message.reply(err)
-        return
+        err = "Please provide the announcement message content.\n\n*Usage:* `$announce [#channel] <message>`"
+        return await send_response(message, err, ephemeral=True)
 
     title = get_string("commands.announce.title", "📢 Server Announcement")
-    embed = (
+    author_name = message.author.name if hasattr(message, "author") else (message.user.name if hasattr(message, "user") else "Moderator")
+    view = (
         ContainerBuilder()
         .set_accent_color(COLORS.get("default", "#FF7B00"))
         .add_text_display(f"### {title}")
         .add_separator()
         .add_text_display(announcement_text)
-        .set_footer(f"Announced by {message.author.name if hasattr(message, 'author') else message.user.name}")
+        .set_footer(f"Announced by {author_name}")
         .build()
     )
 
-    await target_channel.send(embed=embed)
+    await send_response(target_channel, view)
     sent_msg = get_string("commands.announce.sent", "✅ Announcement successfully published to <#{channel_id}>.", channel_id=target_channel.id)
-
-    if is_slash and hasattr(message, "response"):
-        await message.response.send_message(sent_msg, ephemeral=True)
-    elif hasattr(message, "reply"):
-        await message.reply(sent_msg)
+    return await send_response(message, sent_msg, ephemeral=True)

@@ -1,4 +1,5 @@
 import os
+import sys
 import io
 import time
 import contextlib
@@ -51,7 +52,7 @@ def redact_secrets(text: str) -> str:
         if val and len(val.strip()) > 3:
             sanitized = sanitized.replace(val.strip(), f"[REDACTED_{key}]")
 
-    cfg_token = getattr(config, "BOT_TOKEN", "") or getattr(config, "settings", {}).get("bot", {}).get("token", "")
+    cfg_token = settings.BOT_TOKEN
     if cfg_token and len(str(cfg_token).strip()) > 3:
         sanitized = sanitized.replace(str(cfg_token).strip(), "[REDACTED_BOT_TOKEN]")
 

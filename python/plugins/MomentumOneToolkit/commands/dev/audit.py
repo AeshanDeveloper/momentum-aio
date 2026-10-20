@@ -4,7 +4,7 @@ import json
 from typing import List, Dict, Any, Optional
 import discord
 
-from config.settings import COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS
 from core.audit.audit_log import AuditLog
 from core.logging.error_tracker import ErrorTracker
 from apps.bot.discord.permissions.resolver import is_bot_owner
@@ -17,6 +17,7 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize,
 )
+from sdk.discord.response import send_response
 from discord import MessageFlags, ButtonStyle
 
 PAGE_SIZE = 5
@@ -134,16 +135,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     author = getattr(message, "user", None) if is_slash else getattr(message, "author", None)
     author_id = str(author.id) if author else ""
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
         denied_msg = "❌ **Access Denied**: This command is restricted to bot owners."
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(denied_msg, ephemeral=True)
-        elif hasattr(message, "reply"):
-            return await message.reply(denied_msg)
-        return
+        return await send_response(message, denied_msg, ephemeral=True)
 
     E = EMOJIS
     C = COLORS
@@ -173,26 +169,26 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         error_id = args[1].strip() if len(args) > 1 else None
         if not error_id:
             text = "⚠️ Please specify an Error ID (e.g. `ERR-A1B2C3D4`)."
-            return await (message.response.send_message(text, ephemeral=True) if is_slash else message.reply(text))
+            return await send_response(message, text, ephemeral=True)
         record = await ErrorTracker.get(error_id)
         if not record:
             text = f"❌ Error with ID `{error_id}` was not found in the database."
-            return await (message.response.send_message(text, ephemeral=True) if is_slash else message.reply(text))
+            return await send_response(message, text, ephemeral=True)
         container = build_error_detail_container(record, emojis, colors)
-        return await (message.response.send_message(view=container) if is_slash else message.reply(view=container))
+        return await send_response(message, container)
 
     # Subcommand: view <auditId>
     if sub == "view":
         audit_id = args[1].strip() if len(args) > 1 else None
         if not audit_id:
             text = "⚠️ Please specify an Audit ID."
-            return await (message.response.send_message(text, ephemeral=True) if is_slash else message.reply(text))
+            return await send_response(message, text, ephemeral=True)
         entry = await AuditLog.get(audit_id)
         if not entry:
             text = f"❌ Audit record `{audit_id}` was not found."
-            return await (message.response.send_message(text, ephemeral=True) if is_slash else message.reply(text))
+            return await send_response(message, text, ephemeral=True)
         container = build_audit_detail_container(entry, emojis, colors)
-        return await (message.response.send_message(view=container) if is_slash else message.reply(view=container))
+        return await send_response(message, container)
 
     # Subcommand: errors [page]
     if sub == "errors":
@@ -325,11 +321,7 @@ async def handle_audit_pagination(message: Any, author_id: str, initial_page: in
         return container.build(), safe_page, total_pages
 
     built, page, total_pages = await render_page(current_page)
-    reply_msg = None
-    if is_slash and hasattr(message, "response") and not message.response.is_done():
-        reply_msg = await message.response.send_message(embed=built.embed, view=built.view)
-    elif hasattr(message, "reply"):
-        reply_msg = await message.reply(embed=built.embed, view=built.view)
+    reply_msg = await send_response(message, built)
 
     target_msg = reply_msg or message
     collector = built.create_message_component_collector(
@@ -344,19 +336,19 @@ async def handle_audit_pagination(message: Any, author_id: str, initial_page: in
             page = max(1, page - 1)
             updated, page, _ = await render_page(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated.view)
 
         async def on_next(inter):
             nonlocal page
             page += 1
             updated, page, _ = await render_page(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated.view)
 
         async def on_refresh(inter):
             updated, page, _ = await render_page(page)
             if hasattr(inter, "response"):
-                await inter.response.edit_message(embed=updated.embed, view=updated.view)
+                await inter.response.edit_message(view=updated.view)
 
         async def on_errors(inter):
             await handle_errors_pagination(inter, author_id, 1, emojis, colors, is_interaction=True)
@@ -369,11 +361,9 @@ async def handle_audit_pagination(message: Any, author_id: str, initial_page: in
                 entry = await AuditLog.get(audit_id)
                 if entry:
                     detail = build_audit_detail_container(entry, emojis, colors)
-                    if hasattr(inter, "response"):
-                        await inter.response.send_message(embed=detail.embed, ephemeral=True)
+                    await send_response(inter, detail, ephemeral=True)
                 else:
-                    if hasattr(inter, "response"):
-                        await inter.response.send_message("Audit entry not found.", ephemeral=True)
+                    await send_response(inter, "Audit entry not found.", ephemeral=True)
 
         collector.on(f"{session_id}:prev", on_prev)
         collector.on(f"{session_id}:next", on_next)
