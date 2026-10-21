@@ -92,10 +92,13 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     author = getattr(message, "user", None) if str(command_type).lower() == "slash" else getattr(message, "author", None)
     author_perms = message.channel.permissions_for(author) if (author and hasattr(message.channel, "permissions_for")) else None
     
-    # Check user MANAGE_CHANNELS permission
+    # Check user MANAGE_CHANNELS permission or MomentumOne virtual moderator authorization
     is_admin = getattr(author_perms, "administrator", False) if author_perms else False
     has_manage_ch = getattr(author_perms, "manage_channels", False) if author_perms else False
-    if not (is_admin or has_manage_ch):
+    from core.security.server_commands import ServerCommandManager
+    is_virtual_mod = ServerCommandManager.is_authorized_moderator(str(guild.id), author, "channel")
+
+    if not (is_admin or has_manage_ch or is_virtual_mod):
         return await send_ui(message, "permissions.missing_user_permission", variables={"permissions": "`Manage Channels`"}, style="error")
 
     if not args:

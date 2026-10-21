@@ -13,6 +13,29 @@ def get_permission_name(permission: Any) -> str:
         return s
     return str(permission)
 
+def has_permission(member: Any, permission: Any) -> bool:
+    """
+    Checks if a member has a specific permission.
+    Handles discord.py Member / Permissions or raw integers/names.
+    """
+    if member is None:
+        return False
+    if hasattr(member, "guild_permissions"):
+        if member.guild_permissions.administrator:
+            return True
+        if isinstance(permission, str):
+            attr = permission.lower().replace(" ", "_")
+            if hasattr(member.guild_permissions, attr):
+                return bool(getattr(member.guild_permissions, attr))
+        elif isinstance(permission, int):
+            return bool(member.guild_permissions.value & permission)
+    elif hasattr(member, "permissions"):
+        if callable(member.permissions.has):
+            return bool(member.permissions.has(permission))
+        elif isinstance(permission, int):
+            return bool(member.permissions & permission)
+    return False
+
 def is_bot_owner(user_id: Optional[str]) -> bool:
     """Returns True if the user ID is configured as a bot owner."""
     if not user_id:

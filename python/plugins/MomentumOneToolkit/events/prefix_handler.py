@@ -122,26 +122,28 @@ async def execute(ctx: Any, message: discord.Message):
                 user_perms=found_command.user_permissions,
                 bot_perms=found_command.bot_permissions
             )
-            if not perms.get("allowed"):
-                if perms.get("missing_user"):
-                    missing_str = ", ".join(perms.get("missing_user_names", []))
-                    await send_ui(
-                        message,
-                        "permissions.missing_user_permission",
-                        variables={"permissions": missing_str},
-                        style="error"
-                    )
-                    return
+            is_virtual_mod = ServerCommandManager.is_authorized_moderator(str(message.guild.id), message.author, found_command.name)
+            
+            # If user has missing permissions, check if they are authorized as virtual moderator
+            if perms.get("missing_user") and not is_virtual_mod:
+                missing_str = ", ".join(perms.get("missing_user_names", []))
+                await send_ui(
+                    message,
+                    "permissions.missing_user_permission",
+                    variables={"permissions": missing_str},
+                    style="error"
+                )
+                return
 
-                if perms.get("missing_bot"):
-                    missing_str = ", ".join(perms.get("missing_bot_names", []))
-                    await send_ui(
-                        message,
-                        "permissions.missing_bot_permission",
-                        variables={"permissions": missing_str},
-                        style="error"
-                    )
-                    return
+            if perms.get("missing_bot"):
+                missing_str = ", ".join(perms.get("missing_bot_names", []))
+                await send_ui(
+                    message,
+                    "permissions.missing_bot_permission",
+                    variables={"permissions": missing_str},
+                    style="error"
+                )
+                return
 
         # 8. Cooldown Check
         guild_id = str(message.guild.id) if message.guild else None

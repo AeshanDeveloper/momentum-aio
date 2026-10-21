@@ -87,6 +87,86 @@ class BotManager:
                 except Exception as err:
                     logger.error(f"[BotManager] Error executing interaction handler {h.name}: {err}")
 
+        # Wire Anti-Nuke Security Event Listeners
+        from core.security.antinuke_service import AntiNukeService
+
+        @self.client.event
+        async def on_member_ban(guild: discord.Guild, user: discord.User | discord.Member):
+            try:
+                await AntiNukeService.on_member_ban(guild, user)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_member_ban: {err}")
+
+        @self.client.event
+        async def on_member_remove(member: discord.Member):
+            try:
+                await AntiNukeService.on_member_remove(member)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_member_remove: {err}")
+
+        @self.client.event
+        async def on_member_join(member: discord.Member):
+            try:
+                await AntiNukeService.on_member_join(member)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_member_join: {err}")
+
+        @self.client.event
+        async def on_member_update(before: discord.Member, after: discord.Member):
+            try:
+                await AntiNukeService.on_member_update(before, after)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_member_update: {err}")
+
+        @self.client.event
+        async def on_guild_role_create(role: discord.Role):
+            try:
+                await AntiNukeService.on_guild_role_create(role)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_role_create: {err}")
+
+        @self.client.event
+        async def on_guild_role_delete(role: discord.Role):
+            try:
+                await AntiNukeService.on_guild_role_delete(role)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_role_delete: {err}")
+
+        @self.client.event
+        async def on_guild_role_update(before: discord.Role, after: discord.Role):
+            try:
+                await AntiNukeService.on_guild_role_update(before, after)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_role_update: {err}")
+
+        @self.client.event
+        async def on_guild_channel_create(channel: discord.abc.GuildChannel):
+            try:
+                await AntiNukeService.on_guild_channel_create(channel)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_channel_create: {err}")
+
+        @self.client.event
+        async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
+            try:
+                await AntiNukeService.on_guild_channel_delete(channel)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_channel_delete: {err}")
+
+        @self.client.event
+        async def on_guild_channel_update(before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
+            try:
+                await AntiNukeService.on_guild_channel_update(before, after)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_channel_update: {err}")
+
+        @self.client.event
+        async def on_webhooks_update(channel: discord.abc.GuildChannel):
+            try:
+                await AntiNukeService.on_webhooks_update(channel)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_webhooks_update: {err}")
+
     async def setup(self) -> Dict[str, bool]:
         try:
             # 1. Discover and load plugins

@@ -23,6 +23,7 @@ from database.database import database
 from core.security.server_commands import ServerCommandManager
 from core.security.blacklist import BlacklistManager
 from core.security.noprefix import NoPrefixManager
+from core.security.antinuke import AntiNukeManager
 from apps.bot.main import BotApp
 from apps.api.server import ApiServer
 
@@ -42,7 +43,8 @@ async def main():
         await ServerCommandManager.initialize()
         await BlacklistManager.initialize()
         await NoPrefixManager.initialize()
-        logger.info("[MomentumOne] Security registries (ServerCommands, Blacklist, NoPrefix) hydrated from storage.")
+        await AntiNukeManager.initialize()
+        logger.info("[MomentumOne] Security registries (ServerCommands, Blacklist, NoPrefix, AntiNuke) hydrated from storage.")
     except Exception as err:
         logger.error(f"[Startup] Database initialization or hydration failed: {err}")
 

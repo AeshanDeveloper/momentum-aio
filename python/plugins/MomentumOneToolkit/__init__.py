@@ -13,7 +13,7 @@ from core.logging.logger import logger
 # Import commands
 from .commands import ping, help, ai
 from .commands.general import botinfo, server, profile, bug, notifications, update
-from .commands.moderation import announce, channel, command_manage
+from .commands.moderation import announce, channel, command_manage, antinuke
 from .commands.tickets import ticket
 from .commands.dev import (
     blacklist,
@@ -58,6 +58,7 @@ class Plugin(BasePlugin):
             announce,
             channel,
             command_manage,
+            antinuke,
             ticket,
             blacklist,
             unblacklist,
