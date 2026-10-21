@@ -132,18 +132,20 @@ class ApiServer:
     async def start(self) -> None:
         runner = web.AppRunner(self.app)
         await runner.setup()
-        port = int(os.getenv("API_PORT", os.getenv("PORT", 3000)))
+        base_port = int(os.getenv("API_PORT", os.getenv("PORT", 3000)))
         host = settings.HOST
-        try:
-            site = web.TCPSite(runner, host=host, port=port)
-            await site.start()
-            logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://{host}:{port}")
-        except OSError as e:
-            if e.errno == 98 or "address already in use" in str(e).lower():
-                alt_port = 3001 if port == 3000 else port + 1
-                logger.warn(f"[Server] Port {port} in use, falling back to port {alt_port}")
-                site = web.TCPSite(runner, host=host, port=alt_port)
+        for offset in range(10):
+            target_port = base_port + offset
+            try:
+                site = web.TCPSite(runner, host=host, port=target_port)
                 await site.start()
-                logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://{host}:{alt_port}")
-            else:
+                if offset > 0:
+                    logger.warn(f"[Server] Port {base_port} in use, bound to fallback port {target_port}")
+                else:
+                    logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://{host}:{target_port}")
+                return
+            except OSError as e:
+                if e.errno == 98 or "address already in use" in str(e).lower():
+                    continue
                 raise
+        logger.error(f"[Server] Could not bind web server to any port in range {base_port}-{base_port+9}")

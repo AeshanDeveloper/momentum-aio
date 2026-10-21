@@ -11,7 +11,13 @@ from config.strings import get_string
 from core.logging.logger import logger
 from database.database import database
 from apps.bot.discord.permissions.resolver import is_bot_owner
-from sdk.discord.builders import ContainerBuilder, ActionRowBuilder, ButtonBuilder, SeparatorSpacingSize
+from sdk.discord.builders import (
+    ContainerBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    SeparatorSpacingSize,
+)
 
 
 class AntiNukeConstants:
@@ -28,38 +34,171 @@ class AntiNukeConstants:
     PUNISH_TIMEOUT = "timeout"
     VALID_PUNISHMENTS = [PUNISH_BAN, PUNISH_KICK, PUNISH_QUARANTINE, PUNISH_TIMEOUT]
 
-    # Events Monitored
-    EVENT_BAN = "ban"
-    EVENT_KICK = "kick"
-    EVENT_TIMEOUT = "timeout"
+    # Target Types for Whitelist
+    TARGET_USER = "user"
+    TARGET_ROLE = "role"
+    TARGET_CHANNEL = "channel"
+    TARGET_CATEGORY = "category"
+    VALID_TARGET_TYPES = [TARGET_USER, TARGET_ROLE, TARGET_CHANNEL, TARGET_CATEGORY]
+
+    # Canonical 23 Discord Event Keys
+    EVENT_GUILD_UPDATE = "guildUpdate"
+    EVENT_CHANNEL_CREATE = "channelCreate"
+    EVENT_CHANNEL_UPDATE = "channelUpdate"
+    EVENT_CHANNEL_DELETE = "channelDelete"
+    EVENT_ROLE_CREATE = "roleCreate"
+    EVENT_ROLE_UPDATE = "roleUpdate"
+    EVENT_ROLE_DELETE = "roleDelete"
+    EVENT_MEMBER_UPDATE = "guildMemberUpdate"
+    EVENT_MEMBER_REMOVE = "guildMemberRemove"
+    EVENT_BAN_ADD = "guildBanAdd"
+    EVENT_BAN_REMOVE = "guildBanRemove"
+    EVENT_EMOJIS_UPDATE = "guildEmojisUpdate"
+    EVENT_STICKERS_UPDATE = "guildStickersUpdate"
+    EVENT_WEBHOOKS_UPDATE = "webhooksUpdate"
+    EVENT_INVITE_CREATE = "inviteCreate"
+    EVENT_INVITE_DELETE = "inviteDelete"
+    EVENT_INTEGRATIONS_UPDATE = "guildIntegrationsUpdate"
+    EVENT_AUTOMOD_CREATE = "autoModerationRuleCreate"
+    EVENT_AUTOMOD_UPDATE = "autoModerationRuleUpdate"
+    EVENT_AUTOMOD_DELETE = "autoModerationRuleDelete"
+    EVENT_AUDIT_LOG_CREATE = "guildAuditLogEntryCreate"
+    EVENT_SCHEDULED_EVENT_DELETE = "guildScheduledEventDelete"
+    EVENT_THREAD_DELETE = "threadDelete"
     EVENT_BOT_ADD = "bot_add"
-    EVENT_ROLE_CREATE = "role_create"
-    EVENT_ROLE_DELETE = "role_delete"
-    EVENT_ROLE_UPDATE = "role_update"
-    EVENT_CHANNEL_CREATE = "channel_create"
-    EVENT_CHANNEL_DELETE = "channel_delete"
-    EVENT_CHANNEL_UPDATE = "channel_update"
-    EVENT_WEBHOOK_CREATE = "webhook_create"
-    EVENT_WEBHOOK_DELETE = "webhook_delete"
-    EVENT_WEBHOOK_UPDATE = "webhook_update"
-    EVENT_MEMBER_UPDATE = "member_update"
 
     ALL_EVENTS = [
-        EVENT_BAN,
-        EVENT_KICK,
-        EVENT_TIMEOUT,
-        EVENT_BOT_ADD,
-        EVENT_ROLE_CREATE,
-        EVENT_ROLE_DELETE,
-        EVENT_ROLE_UPDATE,
+        EVENT_GUILD_UPDATE,
         EVENT_CHANNEL_CREATE,
-        EVENT_CHANNEL_DELETE,
         EVENT_CHANNEL_UPDATE,
-        EVENT_WEBHOOK_CREATE,
-        EVENT_WEBHOOK_DELETE,
-        EVENT_WEBHOOK_UPDATE,
+        EVENT_CHANNEL_DELETE,
+        EVENT_ROLE_CREATE,
+        EVENT_ROLE_UPDATE,
+        EVENT_ROLE_DELETE,
         EVENT_MEMBER_UPDATE,
+        EVENT_MEMBER_REMOVE,
+        EVENT_BAN_ADD,
+        EVENT_BAN_REMOVE,
+        EVENT_EMOJIS_UPDATE,
+        EVENT_STICKERS_UPDATE,
+        EVENT_WEBHOOKS_UPDATE,
+        EVENT_INVITE_CREATE,
+        EVENT_INVITE_DELETE,
+        EVENT_INTEGRATIONS_UPDATE,
+        EVENT_AUTOMOD_CREATE,
+        EVENT_AUTOMOD_UPDATE,
+        EVENT_AUTOMOD_DELETE,
+        EVENT_AUDIT_LOG_CREATE,
+        EVENT_SCHEDULED_EVENT_DELETE,
+        EVENT_THREAD_DELETE,
+        EVENT_BOT_ADD,
     ]
+
+    # Category and Severity Metadata
+    EVENT_METADATA: Dict[str, Dict[str, str]] = {
+        EVENT_GUILD_UPDATE: {"category": "server", "severity": "high"},
+        EVENT_CHANNEL_CREATE: {"category": "channel", "severity": "high"},
+        EVENT_CHANNEL_UPDATE: {"category": "channel", "severity": "high"},
+        EVENT_CHANNEL_DELETE: {"category": "channel", "severity": "critical"},
+        EVENT_ROLE_CREATE: {"category": "role", "severity": "high"},
+        EVENT_ROLE_UPDATE: {"category": "role", "severity": "critical"},
+        EVENT_ROLE_DELETE: {"category": "role", "severity": "critical"},
+        EVENT_MEMBER_UPDATE: {"category": "member", "severity": "high"},
+        EVENT_MEMBER_REMOVE: {"category": "member", "severity": "critical"},
+        EVENT_BAN_ADD: {"category": "moderation", "severity": "critical"},
+        EVENT_BAN_REMOVE: {"category": "moderation", "severity": "high"},
+        EVENT_EMOJIS_UPDATE: {"category": "assets", "severity": "high"},
+        EVENT_STICKERS_UPDATE: {"category": "assets", "severity": "high"},
+        EVENT_WEBHOOKS_UPDATE: {"category": "webhook", "severity": "critical"},
+        EVENT_INVITE_CREATE: {"category": "invite", "severity": "medium"},
+        EVENT_INVITE_DELETE: {"category": "invite", "severity": "medium"},
+        EVENT_INTEGRATIONS_UPDATE: {"category": "integration", "severity": "high"},
+        EVENT_AUTOMOD_CREATE: {"category": "automod", "severity": "high"},
+        EVENT_AUTOMOD_UPDATE: {"category": "automod", "severity": "critical"},
+        EVENT_AUTOMOD_DELETE: {"category": "automod", "severity": "critical"},
+        EVENT_AUDIT_LOG_CREATE: {"category": "audit", "severity": "critical"},
+        EVENT_SCHEDULED_EVENT_DELETE: {"category": "event", "severity": "medium"},
+        EVENT_THREAD_DELETE: {"category": "thread", "severity": "high"},
+        EVENT_BOT_ADD: {"category": "member", "severity": "critical"},
+    }
+
+    # Alias / Token normalization dictionary
+    EVENT_ALIASES: Dict[str, str] = {
+        "guildupdate": EVENT_GUILD_UPDATE,
+        "guild_update": EVENT_GUILD_UPDATE,
+        "server": EVENT_GUILD_UPDATE,
+        "server_update": EVENT_GUILD_UPDATE,
+        "channelcreate": EVENT_CHANNEL_CREATE,
+        "channel_create": EVENT_CHANNEL_CREATE,
+        "channelupdate": EVENT_CHANNEL_UPDATE,
+        "channel_update": EVENT_CHANNEL_UPDATE,
+        "channeldelete": EVENT_CHANNEL_DELETE,
+        "channel_delete": EVENT_CHANNEL_DELETE,
+        "channel": EVENT_CHANNEL_DELETE,
+        "channels": EVENT_CHANNEL_DELETE,
+        "rolecreate": EVENT_ROLE_CREATE,
+        "role_create": EVENT_ROLE_CREATE,
+        "roleupdate": EVENT_ROLE_UPDATE,
+        "role_update": EVENT_ROLE_UPDATE,
+        "roledelete": EVENT_ROLE_DELETE,
+        "role_delete": EVENT_ROLE_DELETE,
+        "role": EVENT_ROLE_DELETE,
+        "roles": EVENT_ROLE_DELETE,
+        "guildmemberupdate": EVENT_MEMBER_UPDATE,
+        "member_update": EVENT_MEMBER_UPDATE,
+        "timeout": EVENT_MEMBER_UPDATE,
+        "timeouts": EVENT_MEMBER_UPDATE,
+        "mute": EVENT_MEMBER_UPDATE,
+        "guildmemberremove": EVENT_MEMBER_REMOVE,
+        "member_remove": EVENT_MEMBER_REMOVE,
+        "kick": EVENT_MEMBER_REMOVE,
+        "kicks": EVENT_MEMBER_REMOVE,
+        "guildbanadd": EVENT_BAN_ADD,
+        "ban_add": EVENT_BAN_ADD,
+        "ban": EVENT_BAN_ADD,
+        "bans": EVENT_BAN_ADD,
+        "guildbanremove": EVENT_BAN_REMOVE,
+        "ban_remove": EVENT_BAN_REMOVE,
+        "unban": EVENT_BAN_REMOVE,
+        "guildemojisupdate": EVENT_EMOJIS_UPDATE,
+        "emojis": EVENT_EMOJIS_UPDATE,
+        "emoji": EVENT_EMOJIS_UPDATE,
+        "guildstickersupdate": EVENT_STICKERS_UPDATE,
+        "stickers": EVENT_STICKERS_UPDATE,
+        "sticker": EVENT_STICKERS_UPDATE,
+        "webhooksupdate": EVENT_WEBHOOKS_UPDATE,
+        "webhook": EVENT_WEBHOOKS_UPDATE,
+        "webhooks": EVENT_WEBHOOKS_UPDATE,
+        "webhook_create": EVENT_WEBHOOKS_UPDATE,
+        "webhook_delete": EVENT_WEBHOOKS_UPDATE,
+        "webhook_update": EVENT_WEBHOOKS_UPDATE,
+        "invitecreate": EVENT_INVITE_CREATE,
+        "invite_create": EVENT_INVITE_CREATE,
+        "invite": EVENT_INVITE_CREATE,
+        "invites": EVENT_INVITE_CREATE,
+        "invitedelete": EVENT_INVITE_DELETE,
+        "invite_delete": EVENT_INVITE_DELETE,
+        "guildintegrationsupdate": EVENT_INTEGRATIONS_UPDATE,
+        "integrations": EVENT_INTEGRATIONS_UPDATE,
+        "automoderationrulecreate": EVENT_AUTOMOD_CREATE,
+        "automod_create": EVENT_AUTOMOD_CREATE,
+        "automoderationruleupdate": EVENT_AUTOMOD_UPDATE,
+        "automod_update": EVENT_AUTOMOD_UPDATE,
+        "automoderationruledelete": EVENT_AUTOMOD_DELETE,
+        "automod_delete": EVENT_AUTOMOD_DELETE,
+        "guildauditlogentrycreate": EVENT_AUDIT_LOG_CREATE,
+        "audit_log": EVENT_AUDIT_LOG_CREATE,
+        "audit": EVENT_AUDIT_LOG_CREATE,
+        "guildscheduledeventdelete": EVENT_SCHEDULED_EVENT_DELETE,
+        "event_delete": EVENT_SCHEDULED_EVENT_DELETE,
+        "threaddelete": EVENT_THREAD_DELETE,
+        "thread_delete": EVENT_THREAD_DELETE,
+        "threads": EVENT_THREAD_DELETE,
+        "bot_add": EVENT_BOT_ADD,
+        "botadd": EVENT_BOT_ADD,
+        "bot": EVENT_BOT_ADD,
+        "bots": EVENT_BOT_ADD,
+    }
 
     # Dangerous Discord Native Permissions to Audit & Guard
     DANGEROUS_PERMISSIONS = {
@@ -83,49 +222,95 @@ class AntiNukeConstants:
         re.compile(r"-ticket$", re.IGNORECASE),
     ]
 
+    @classmethod
+    def normalize_event(cls, name_or_alias: str) -> Optional[str]:
+        """Normalizes any event alias or legacy name to its canonical key."""
+        if not name_or_alias:
+            return None
+        cleaned = name_or_alias.strip().lower()
+        if cleaned in cls.EVENT_ALIASES:
+            return cls.EVENT_ALIASES[cleaned]
+        for ev in cls.ALL_EVENTS:
+            if ev.lower() == cleaned:
+                return ev
+        return None
+
+    @classmethod
+    def get_event_display_name(cls, event_key: str) -> str:
+        """Retrieves localized, friendly event name from Strings.json. Never shows raw keys."""
+        canonical = cls.normalize_event(event_key) or event_key
+        name_from_strings = get_string(f"security.antinuke.events.{canonical}.name")
+        if name_from_strings:
+            return name_from_strings
+
+        return re.sub(r"([A-Z])", r" \1", canonical).replace("_", " ").title().strip()
+
+    @classmethod
+    def get_event_description(cls, event_key: str) -> str:
+        """Retrieves localized event explanation from Strings.json."""
+        canonical = cls.normalize_event(event_key) or event_key
+        return get_string(f"security.antinuke.events.{canonical}.desc", "Monitored destructive server event.")
+
 
 def get_default_thresholds(mode: str) -> Dict[str, Dict[str, int]]:
     """Returns default threshold limits and sliding windows based on operating mode."""
     if mode == AntiNukeConstants.MODE_HARD:
-        # Hard mode: 1 action in 60 seconds triggers zero-tolerance punishment
         return {event: {"count": 1, "window": 60} for event in AntiNukeConstants.ALL_EVENTS}
 
     elif mode == AntiNukeConstants.MODE_ULTIMATE:
-        # Ultimate Defence Wall: Configurable sliding burst thresholds
         return {
-            AntiNukeConstants.EVENT_BOT_ADD: {"count": 1, "window": 30},
-            AntiNukeConstants.EVENT_BAN: {"count": 3, "window": 10},
-            AntiNukeConstants.EVENT_KICK: {"count": 3, "window": 10},
-            AntiNukeConstants.EVENT_TIMEOUT: {"count": 4, "window": 10},
-            AntiNukeConstants.EVENT_ROLE_CREATE: {"count": 3, "window": 10},
-            AntiNukeConstants.EVENT_ROLE_DELETE: {"count": 2, "window": 10},
-            AntiNukeConstants.EVENT_ROLE_UPDATE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_GUILD_UPDATE: {"count": 2, "window": 15},
             AntiNukeConstants.EVENT_CHANNEL_CREATE: {"count": 3, "window": 10},
-            AntiNukeConstants.EVENT_CHANNEL_DELETE: {"count": 2, "window": 10},
             AntiNukeConstants.EVENT_CHANNEL_UPDATE: {"count": 3, "window": 10},
-            AntiNukeConstants.EVENT_WEBHOOK_CREATE: {"count": 2, "window": 10},
-            AntiNukeConstants.EVENT_WEBHOOK_DELETE: {"count": 2, "window": 10},
-            AntiNukeConstants.EVENT_WEBHOOK_UPDATE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_CHANNEL_DELETE: {"count": 2, "window": 10},
+            AntiNukeConstants.EVENT_ROLE_CREATE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_ROLE_UPDATE: {"count": 2, "window": 10},
+            AntiNukeConstants.EVENT_ROLE_DELETE: {"count": 2, "window": 10},
             AntiNukeConstants.EVENT_MEMBER_UPDATE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_MEMBER_REMOVE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_BAN_ADD: {"count": 2, "window": 10},
+            AntiNukeConstants.EVENT_BAN_REMOVE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_EMOJIS_UPDATE: {"count": 4, "window": 15},
+            AntiNukeConstants.EVENT_STICKERS_UPDATE: {"count": 4, "window": 15},
+            AntiNukeConstants.EVENT_WEBHOOKS_UPDATE: {"count": 2, "window": 10},
+            AntiNukeConstants.EVENT_INVITE_CREATE: {"count": 4, "window": 10},
+            AntiNukeConstants.EVENT_INVITE_DELETE: {"count": 4, "window": 10},
+            AntiNukeConstants.EVENT_INTEGRATIONS_UPDATE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_AUTOMOD_CREATE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_AUTOMOD_UPDATE: {"count": 2, "window": 10},
+            AntiNukeConstants.EVENT_AUTOMOD_DELETE: {"count": 2, "window": 10},
+            AntiNukeConstants.EVENT_AUDIT_LOG_CREATE: {"count": 6, "window": 10},
+            AntiNukeConstants.EVENT_SCHEDULED_EVENT_DELETE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_THREAD_DELETE: {"count": 3, "window": 10},
+            AntiNukeConstants.EVENT_BOT_ADD: {"count": 1, "window": 30},
         }
 
     else:
-        # Hybrid mode: Instant zero-tolerance on bot additions & dangerous permissions, sliding burst on channels & roles
         return {
-            AntiNukeConstants.EVENT_BOT_ADD: {"count": 1, "window": 60},
-            AntiNukeConstants.EVENT_BAN: {"count": 2, "window": 15},
-            AntiNukeConstants.EVENT_KICK: {"count": 2, "window": 15},
-            AntiNukeConstants.EVENT_TIMEOUT: {"count": 3, "window": 15},
-            AntiNukeConstants.EVENT_ROLE_CREATE: {"count": 2, "window": 15},
-            AntiNukeConstants.EVENT_ROLE_DELETE: {"count": 1, "window": 60},
-            AntiNukeConstants.EVENT_ROLE_UPDATE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_GUILD_UPDATE: {"count": 1, "window": 60},
             AntiNukeConstants.EVENT_CHANNEL_CREATE: {"count": 3, "window": 15},
-            AntiNukeConstants.EVENT_CHANNEL_DELETE: {"count": 1, "window": 60},
             AntiNukeConstants.EVENT_CHANNEL_UPDATE: {"count": 2, "window": 15},
-            AntiNukeConstants.EVENT_WEBHOOK_CREATE: {"count": 1, "window": 60},
-            AntiNukeConstants.EVENT_WEBHOOK_DELETE: {"count": 2, "window": 15},
-            AntiNukeConstants.EVENT_WEBHOOK_UPDATE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_CHANNEL_DELETE: {"count": 1, "window": 60},
+            AntiNukeConstants.EVENT_ROLE_CREATE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_ROLE_UPDATE: {"count": 1, "window": 60},
+            AntiNukeConstants.EVENT_ROLE_DELETE: {"count": 1, "window": 60},
             AntiNukeConstants.EVENT_MEMBER_UPDATE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_MEMBER_REMOVE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_BAN_ADD: {"count": 1, "window": 60},
+            AntiNukeConstants.EVENT_BAN_REMOVE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_EMOJIS_UPDATE: {"count": 3, "window": 15},
+            AntiNukeConstants.EVENT_STICKERS_UPDATE: {"count": 3, "window": 15},
+            AntiNukeConstants.EVENT_WEBHOOKS_UPDATE: {"count": 1, "window": 60},
+            AntiNukeConstants.EVENT_INVITE_CREATE: {"count": 3, "window": 15},
+            AntiNukeConstants.EVENT_INVITE_DELETE: {"count": 3, "window": 15},
+            AntiNukeConstants.EVENT_INTEGRATIONS_UPDATE: {"count": 1, "window": 60},
+            AntiNukeConstants.EVENT_AUTOMOD_CREATE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_AUTOMOD_UPDATE: {"count": 1, "window": 60},
+            AntiNukeConstants.EVENT_AUTOMOD_DELETE: {"count": 1, "window": 60},
+            AntiNukeConstants.EVENT_AUDIT_LOG_CREATE: {"count": 4, "window": 15},
+            AntiNukeConstants.EVENT_SCHEDULED_EVENT_DELETE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_THREAD_DELETE: {"count": 2, "window": 15},
+            AntiNukeConstants.EVENT_BOT_ADD: {"count": 1, "window": 60},
         }
 
 
@@ -135,50 +320,70 @@ def get_default_punishments(mode: str) -> Dict[str, str]:
         return {event: AntiNukeConstants.PUNISH_BAN for event in AntiNukeConstants.ALL_EVENTS}
     elif mode == AntiNukeConstants.MODE_ULTIMATE:
         return {
-            AntiNukeConstants.EVENT_BOT_ADD: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_BAN: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_KICK: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_TIMEOUT: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_ROLE_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_ROLE_DELETE: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_ROLE_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_GUILD_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
             AntiNukeConstants.EVENT_CHANNEL_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_CHANNEL_DELETE: AntiNukeConstants.PUNISH_BAN,
             AntiNukeConstants.EVENT_CHANNEL_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_WEBHOOK_CREATE: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_WEBHOOK_DELETE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_WEBHOOK_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_CHANNEL_DELETE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_ROLE_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_ROLE_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_ROLE_DELETE: AntiNukeConstants.PUNISH_BAN,
             AntiNukeConstants.EVENT_MEMBER_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_MEMBER_REMOVE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_BAN_ADD: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_BAN_REMOVE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_EMOJIS_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_STICKERS_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_WEBHOOKS_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_INVITE_CREATE: AntiNukeConstants.PUNISH_TIMEOUT,
+            AntiNukeConstants.EVENT_INVITE_DELETE: AntiNukeConstants.PUNISH_TIMEOUT,
+            AntiNukeConstants.EVENT_INTEGRATIONS_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_AUTOMOD_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_AUTOMOD_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_AUTOMOD_DELETE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_AUDIT_LOG_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_SCHEDULED_EVENT_DELETE: AntiNukeConstants.PUNISH_TIMEOUT,
+            AntiNukeConstants.EVENT_THREAD_DELETE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_BOT_ADD: AntiNukeConstants.PUNISH_BAN,
         }
     else:
-        # Hybrid
         return {
-            AntiNukeConstants.EVENT_BOT_ADD: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_BAN: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_KICK: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_TIMEOUT: AntiNukeConstants.PUNISH_TIMEOUT,
-            AntiNukeConstants.EVENT_ROLE_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_ROLE_DELETE: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_ROLE_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_GUILD_UPDATE: AntiNukeConstants.PUNISH_BAN,
             AntiNukeConstants.EVENT_CHANNEL_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_CHANNEL_DELETE: AntiNukeConstants.PUNISH_BAN,
             AntiNukeConstants.EVENT_CHANNEL_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_WEBHOOK_CREATE: AntiNukeConstants.PUNISH_BAN,
-            AntiNukeConstants.EVENT_WEBHOOK_DELETE: AntiNukeConstants.PUNISH_QUARANTINE,
-            AntiNukeConstants.EVENT_WEBHOOK_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_CHANNEL_DELETE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_ROLE_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_ROLE_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_ROLE_DELETE: AntiNukeConstants.PUNISH_BAN,
             AntiNukeConstants.EVENT_MEMBER_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_MEMBER_REMOVE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_BAN_ADD: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_BAN_REMOVE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_EMOJIS_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_STICKERS_UPDATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_WEBHOOKS_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_INVITE_CREATE: AntiNukeConstants.PUNISH_TIMEOUT,
+            AntiNukeConstants.EVENT_INVITE_DELETE: AntiNukeConstants.PUNISH_TIMEOUT,
+            AntiNukeConstants.EVENT_INTEGRATIONS_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_AUTOMOD_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_AUTOMOD_UPDATE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_AUTOMOD_DELETE: AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.EVENT_AUDIT_LOG_CREATE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_SCHEDULED_EVENT_DELETE: AntiNukeConstants.PUNISH_TIMEOUT,
+            AntiNukeConstants.EVENT_THREAD_DELETE: AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.EVENT_BOT_ADD: AntiNukeConstants.PUNISH_BAN,
         }
 
 
 class AntiNukeManager:
     """
     Centralized Anti-Nuke Security Manager.
-    Handles per-guild security configurations, threshold evaluation, whitelists,
+    Handles per-guild security configurations, setup state, threshold evaluation, whitelists,
     extra owners, ticket-bot exemptions, enforcement, and forensic alerting.
     """
     _guild_configs: Dict[str, Dict[str, Any]] = {}
-    _event_windows: Dict[Tuple[str, str, str], collections.deque] = {}  # (guild_id, executor_id, event) -> deque of timestamps
+    _event_windows: Dict[Tuple[str, str, str], collections.deque] = {}
     _processed_audit_entries: collections.deque = collections.deque(maxlen=10000)
+    _recent_infraction_dedup: Dict[str, float] = {}
     _initialized: bool = False
 
     @classmethod
@@ -197,6 +402,56 @@ class AntiNukeManager:
         except Exception as err:
             cls._initialized = True
             logger.warning(f"[AntiNukeManager] Failed to hydrate antinuke configurations from database: {err}")
+
+    @classmethod
+    def is_setup_completed(cls, guild_id: str | int) -> bool:
+        """Checks if anti-nuke setup has been completed for a guild."""
+        cfg = cls.get_guild_config(str(guild_id))
+        return bool(cfg.get("setup_completed", False))
+
+    @classmethod
+    def build_setup_required_view(cls, guild: discord.Guild) -> Any:
+        """
+        Builds the mandatory Components V2 Container when a command is run before setup is complete.
+        Structure: Heading -> Separator -> Concise explanation -> Separator -> Configured branding.
+        """
+        title = get_string(
+            "security.antinuke.setup_required.title",
+            f"{EMOJIS.get('shield', '🛡️')} Anti-Nuke Setup Required"
+        )
+        desc = get_string(
+            "security.antinuke.setup_required.description",
+            (
+                f"{EMOJIS.get('warning', '⚠️')} Anti-Nuke protection has not been initialized for this server.\n\n"
+                f"To prevent misconfiguration and accidental lockouts, all anti-nuke controls, whitelists, "
+                f"and real-time monitoring are locked until the interactive Setup Wizard is completed.\n\n"
+                f"Use `$setup` or `$antinuke setup` to begin the guided security configuration."
+            )
+        )
+        footer_text = f"{settings.BOT_NAME} Security Platform • Setup Enforcement"
+
+        action_row = (
+            ActionRowBuilder()
+            .add_button(
+                ButtonBuilder()
+                .set_custom_id(f"an_wiz:step1:{guild.id}")
+                .set_label("Run Setup Wizard")
+                .set_style(ButtonStyle.Primary)
+                .set_emoji(EMOJIS.get("wrench", "🔧"))
+            )
+        )
+
+        return (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("warning", "#F59E0B"))
+            .add_text_display(f"### {title}")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(desc)
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(f"-# {footer_text}")
+            .add_action_row(action_row)
+            .build()
+        )
 
     @classmethod
     def get_mode_display_name(cls, mode: str) -> str:
@@ -218,10 +473,12 @@ class AntiNukeManager:
         default_mode = AntiNukeConstants.MODE_ULTIMATE
         default_config = {
             "guild_id": gid,
+            "setup_completed": False,
             "enabled": False,
             "mode": default_mode,
+            "monitored_events": list(AntiNukeConstants.ALL_EVENTS),
             "extra_owners": [],
-            "whitelists": {},  # entity_id (str) -> list of allowed event strings (e.g. ["*"] or ["channel_create"])
+            "whitelists": {},  # entity_id (str) -> {"type": "user"|"role"|"channel"|"category", "name": str, "events": list[str]}
             "ticket_bots": [],  # list of bot user IDs exempt from ticket channel operations
             "warning_channel_id": None,
             "log_channel_id": None,
@@ -267,19 +524,68 @@ class AntiNukeManager:
         return False
 
     @classmethod
-    def is_whitelisted(cls, guild_id: str, user_id: int | str, event_type: str) -> bool:
-        """Checks if a user or bot is whitelisted for a specific event."""
+    def is_whitelisted(
+        cls,
+        guild_id: str,
+        executor: discord.Member | discord.User,
+        event_type: str,
+        channel: Optional[discord.abc.GuildChannel] = None,
+    ) -> bool:
+        """Checks if an entity is whitelisted for a specific event with target-type awareness."""
         cfg = cls.get_guild_config(str(guild_id))
         whitelists = cfg.get("whitelists", {})
-        uid_str = str(user_id)
-        if uid_str not in whitelists:
+        if not whitelists:
             return False
 
-        allowed = whitelists[uid_str]
-        if not isinstance(allowed, list):
+        canonical_event = AntiNukeConstants.normalize_event(event_type) or event_type
+
+        def _event_matches(allowed_events: Any) -> bool:
+            if not isinstance(allowed_events, list):
+                return False
+            if "*" in allowed_events or "all" in allowed_events:
+                return True
+            for ev in allowed_events:
+                if (AntiNukeConstants.normalize_event(ev) or ev) == canonical_event:
+                    return True
             return False
 
-        return ("*" in allowed or "all" in allowed or event_type in allowed)
+        executor_id = str(executor.id)
+
+        # 1. User check
+        if executor_id in whitelists:
+            data = whitelists[executor_id]
+            allowed = data.get("events", []) if isinstance(data, dict) else data
+            if _event_matches(allowed):
+                return True
+
+        # 2. Role check (if executor has roles)
+        if hasattr(executor, "roles"):
+            for role in (getattr(executor, "roles", None) or []):
+                role_id = str(role.id)
+                if role_id in whitelists:
+                    data = whitelists[role_id]
+                    allowed = data.get("events", []) if isinstance(data, dict) else data
+                    if _event_matches(allowed):
+                        return True
+
+        # 3. Channel check
+        if channel:
+            ch_id = str(channel.id)
+            if ch_id in whitelists:
+                data = whitelists[ch_id]
+                allowed = data.get("events", []) if isinstance(data, dict) else data
+                if _event_matches(allowed):
+                    return True
+
+            # 4. Category check
+            category_id = str(channel.category.id) if getattr(channel, "category", None) else None
+            if category_id and category_id in whitelists:
+                data = whitelists[category_id]
+                allowed = data.get("events", []) if isinstance(data, dict) else data
+                if _event_matches(allowed):
+                    return True
+
+        return False
 
     @classmethod
     def is_ticket_bot_exempt(
@@ -289,46 +595,36 @@ class AntiNukeManager:
         event_type: str,
         channel: Optional[discord.abc.GuildChannel] = None,
     ) -> bool:
-        """
-        Validates whether an approved ticket bot is exempt from false positives.
-        Allows ticket bots to create, delete, or edit channels matching ticket patterns.
-        Retains strict security protection against unrelated destructive actions
-        (such as bans, kicks, role deletions, and webhooks).
-        """
+        """Validates whether an approved ticket bot is exempt from false positives."""
         cfg = cls.get_guild_config(str(guild.id))
         uid_str = str(user_id)
 
-        # Check if the bot is in the approved ticket bot registry
         if uid_str not in [str(x) for x in cfg.get("ticket_bots", [])]:
             return False
 
-        # Only channel events can be exempt for ticket bots
-        if event_type not in [
+        canonical_event = AntiNukeConstants.normalize_event(event_type) or event_type
+        if canonical_event not in [
             AntiNukeConstants.EVENT_CHANNEL_CREATE,
             AntiNukeConstants.EVENT_CHANNEL_DELETE,
             AntiNukeConstants.EVENT_CHANNEL_UPDATE,
+            AntiNukeConstants.EVENT_THREAD_DELETE,
         ]:
             return False
 
-        # If a channel object is available, verify it follows ticket naming or category
         if channel:
             ch_name = getattr(channel, "name", "").lower()
             ch_topic = getattr(channel, "topic", "") or ""
             category_name = getattr(channel.category, "name", "").lower() if getattr(channel, "category", None) else ""
 
-            # Check name regex patterns
             for pat in AntiNukeConstants.TICKET_PATTERNS:
                 if pat.search(ch_name):
                     return True
 
-            # Check ticket category or topic markers
             if "ticket" in category_name or "tickets" in category_name or "ticket" in ch_topic.lower():
                 return True
 
-            # If no channel metadata matched ticket pattern, deny exemption to prevent rogue destruction
             return False
 
-        # Channel creation/deletion without channel instance available (rare)
         return True
 
     @classmethod
@@ -338,15 +634,11 @@ class AntiNukeManager:
         target: Optional[discord.Member] = None,
         required_perm_name: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Audits Discord role hierarchy and bot permissions.
-        NEVER claims protection against roles or permissions the bot cannot control.
-        """
+        """Audits Discord role hierarchy and bot permissions."""
         me = getattr(guild, "me", None)
         if not me:
             return {"can_act": False, "reason": "Bot member is not present in guild."}
 
-        # Check bot native permissions
         if not me.guild_permissions.administrator:
             needed = {
                 "ban": me.guild_permissions.ban_members,
@@ -361,7 +653,6 @@ class AntiNukeManager:
                     "reason": f"Bot is missing required Discord permission: `{required_perm_name}`."
                 }
 
-        # Check role hierarchy if target member is provided
         if target:
             if target.id == guild.owner_id:
                 return {"can_act": False, "reason": "Target is the Server Owner; Discord prevents all bot actions."}
@@ -370,7 +661,7 @@ class AntiNukeManager:
             if target.top_role >= me.top_role:
                 return {
                     "can_act": False,
-                    "reason": f"Target's highest role ({target.top_role.name}) is higher than or equal to MomentumOne's role ({me.top_role.name})."
+                    "reason": f"Target's highest role ({target.top_role.name}) is higher than or equal to bot's role ({me.top_role.name})."
                 }
 
         return {"can_act": True, "reason": "Bot has adequate hierarchy and permissions."}
@@ -385,23 +676,23 @@ class AntiNukeManager:
         details: Optional[Dict[str, Any]] = None,
         channel: Optional[discord.abc.GuildChannel] = None,
     ) -> Dict[str, Any]:
-        """
-        Core anti-nuke evaluation pipeline:
-        1. Validates if Anti-Nuke is active.
-        2. Deduplicates repeated audit-log polling events.
-        3. Checks exemptions (Owner, Extra Owner, Bot, Whitelist, Ticket Bot).
-        4. Evaluates sliding window thresholds.
-        5. Executes punishment if threshold exceeded.
-        6. Dispatches forensic security warning to webhook / alert channel.
-        """
+        """Core anti-nuke evaluation and rate-limiting pipeline."""
         if not guild or not executor:
             return {"action_taken": None, "reason": "Invalid guild or executor"}
 
         cfg = cls.get_guild_config(str(guild.id))
+
+        if not cfg.get("setup_completed", False):
+            return {"action_taken": None, "reason": "Anti-Nuke setup is not completed"}
         if not cfg.get("enabled", False):
             return {"action_taken": None, "reason": "Anti-Nuke is disabled for this server"}
 
-        # Check duplicate audit-log entry
+        canonical_event = AntiNukeConstants.normalize_event(event_type) or event_type
+
+        monitored = cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+        if canonical_event not in monitored and "*" not in monitored:
+            return {"action_taken": None, "reason": f"Event {canonical_event} is not in monitored events"}
+
         if audit_entry_id:
             if audit_entry_id in cls._processed_audit_entries:
                 return {"action_taken": None, "reason": "Duplicate audit entry already processed"}
@@ -412,39 +703,39 @@ class AntiNukeManager:
         if me and executor_id == str(me.id):
             return {"action_taken": None, "reason": "Executor is the bot itself"}
 
-        # Exemption 1: Server Owner or Extra Owners
         if cls.is_owner_or_extra_owner(guild, executor_id):
             return {"action_taken": None, "reason": "Executor is Server Owner or Extra Owner"}
 
-        # Exemption 2: Whitelist
-        if cls.is_whitelisted(str(guild.id), executor_id, event_type):
-            return {"action_taken": None, "reason": f"Executor is whitelisted for {event_type}"}
+        if cls.is_whitelisted(str(guild.id), executor, canonical_event, channel):
+            return {"action_taken": None, "reason": f"Executor or target is whitelisted for {canonical_event}"}
 
-        # Exemption 3: Ticket Bot Exemption
-        if getattr(executor, "bot", False) and cls.is_ticket_bot_exempt(guild, executor_id, event_type, channel):
+        if getattr(executor, "bot", False) and cls.is_ticket_bot_exempt(guild, executor_id, canonical_event, channel):
             return {"action_taken": None, "reason": f"Ticket bot {executor_id} exempt for ticket channel operation"}
 
-        # Evaluate sliding window
+        dedup_key = f"{guild.id}:{executor_id}:{canonical_event}:{audit_entry_id or time.time() // 2}"
         now = time.time()
+        if dedup_key in cls._recent_infraction_dedup:
+            if now - cls._recent_infraction_dedup[dedup_key] < 3.0:
+                return {"action_taken": None, "reason": "Deduplicated rapid duplicate event"}
+        cls._recent_infraction_dedup[dedup_key] = now
+
         mode = cfg.get("mode", AntiNukeConstants.MODE_ULTIMATE)
-        thresholds = cfg.get("thresholds", {}).get(event_type) or get_default_thresholds(mode).get(event_type, {"count": 1, "window": 60})
+        thresholds = cfg.get("thresholds", {}).get(canonical_event) or get_default_thresholds(mode).get(canonical_event, {"count": 1, "window": 60})
         limit_count = thresholds.get("count", 1)
         window_seconds = thresholds.get("window", 60)
 
-        key = (str(guild.id), executor_id, event_type)
+        key = (str(guild.id), executor_id, canonical_event)
         if key not in cls._event_windows:
             cls._event_windows[key] = collections.deque()
 
         dq = cls._event_windows[key]
         dq.append(now)
 
-        # Evict timestamps outside sliding window
         while dq and dq[0] < now - window_seconds:
             dq.popleft()
 
         current_count = len(dq)
         if current_count < limit_count:
-            # Under threshold limit: log warning state if nearing limit
             return {
                 "action_taken": None,
                 "current_count": current_count,
@@ -452,21 +743,19 @@ class AntiNukeManager:
                 "reason": "Within safe threshold"
             }
 
-        # Threshold reached or exceeded! Determine punishment
         punishments = cfg.get("punishments", {})
-        default_punish = get_default_punishments(mode).get(event_type, AntiNukeConstants.PUNISH_BAN)
-        punishment = punishments.get(event_type, default_punish)
+        default_punish = get_default_punishments(mode).get(canonical_event, AntiNukeConstants.PUNISH_BAN)
+        punishment = punishments.get(canonical_event, default_punish)
 
-        action_result = await cls._execute_punishment(guild, executor, punishment, event_type, details)
+        action_result = await cls._execute_punishment(guild, executor, punishment, canonical_event, details)
 
-        # Log security incident to database
         incident_doc = {
             "guild_id": str(guild.id),
             "guild_name": guild.name,
             "executor_id": executor_id,
             "executor_name": str(executor),
             "is_bot": bool(getattr(executor, "bot", False)),
-            "event_type": event_type,
+            "event_type": canonical_event,
             "count": current_count,
             "threshold": limit_count,
             "window": window_seconds,
@@ -481,8 +770,11 @@ class AntiNukeManager:
         except Exception as err:
             logger.error(f"[AntiNukeManager] Failed to log security incident to database: {err}")
 
-        # Send security warning and forensic recommendation
-        asyncio.create_task(cls._send_security_alert(guild, executor, event_type, current_count, limit_count, window_seconds, punishment, action_result, details or {}))
+        asyncio.create_task(
+            cls._send_security_alert(
+                guild, executor, canonical_event, current_count, limit_count, window_seconds, punishment, action_result, details or {}
+            )
+        )
 
         return {
             "action_taken": punishment,
@@ -515,7 +807,8 @@ class AntiNukeManager:
             logger.warning(f"[AntiNuke] Cannot punish {executor} ({executor.id}): {hierarchy_check.get('reason')}")
             return {"success": False, "error": hierarchy_check.get("reason")}
 
-        reason = f"MomentumOne Anti-Nuke: Threshold exceeded for {event_type}."
+        friendly_event = AntiNukeConstants.get_event_display_name(event_type)
+        reason = f"{settings.BOT_NAME} Anti-Nuke: Threshold exceeded for {friendly_event}."
 
         try:
             if punishment == AntiNukeConstants.PUNISH_BAN:
@@ -526,25 +819,22 @@ class AntiNukeManager:
                 if target_member:
                     await target_member.kick(reason=reason)
                     return {"success": True, "punishment": "kick"}
-                else:
-                    return {"success": False, "error": "Member not in guild to kick"}
+                return {"success": False, "error": "Member not in guild to kick"}
 
             elif punishment == AntiNukeConstants.PUNISH_TIMEOUT:
                 if target_member and hasattr(target_member, "timeout"):
-                    timeout_until = discord.utils.utcnow() + datetime_timedelta(days=28)
+                    import datetime
+                    timeout_until = discord.utils.utcnow() + datetime.timedelta(days=28)
                     await target_member.timeout(timeout_until, reason=reason)
                     return {"success": True, "punishment": "timeout"}
-                else:
-                    return {"success": False, "error": "Member cannot be timed out"}
+                return {"success": False, "error": "Member cannot be timed out"}
 
             elif punishment == AntiNukeConstants.PUNISH_QUARANTINE:
-                # Quarantine: Strip all manageable dangerous roles from attacker
                 if target_member:
                     me = guild.me
                     roles_to_remove = [r for r in target_member.roles if r < me.top_role and not r.is_default()]
                     if roles_to_remove:
                         await target_member.remove_roles(*roles_to_remove, reason=reason)
-                    # If a specific quarantine role is configured, apply it
                     cfg = cls.get_guild_config(str(guild.id))
                     q_role_id = cfg.get("quarantine_role_id")
                     if q_role_id:
@@ -552,8 +842,7 @@ class AntiNukeManager:
                         if q_role and q_role < me.top_role:
                             await target_member.add_roles(q_role, reason="Quarantined by Anti-Nuke")
                     return {"success": True, "punishment": "quarantine", "stripped_roles": [r.name for r in roles_to_remove]}
-                else:
-                    return {"success": False, "error": "Member not found to quarantine"}
+                return {"success": False, "error": "Member not found to quarantine"}
 
         except Exception as err:
             logger.error(f"[AntiNuke] Execution error enforcing {punishment} on {executor.id}: {err}")
@@ -574,17 +863,15 @@ class AntiNukeManager:
         action_result: Dict[str, Any],
         details: Dict[str, Any],
     ) -> None:
-        """
-        Sends formatted forensic security warning to configured warning channel.
-        Prefers Discord Webhook delivery with bot-message fallback.
-        Includes separate user vs bot logging and actionable staff recommendations.
-        """
+        """Sends formatted forensic alert adhering to Components V2 container standards."""
         cfg = cls.get_guild_config(str(guild.id))
         warning_channel_id = cfg.get("warning_channel_id") or cfg.get("log_channel_id")
         webhook_url = cfg.get("webhook_url")
 
         is_bot = bool(getattr(executor, "bot", False))
         executor_type = "Automated Bot Account" if is_bot else "User Account"
+        friendly_event = AntiNukeConstants.get_event_display_name(event_type)
+
         alert_title = get_string(
             "security.antinuke.alert_title_bot" if is_bot else "security.antinuke.alert_title_user",
             f"Forensic Alert: Unauthorized {'Bot' if is_bot else 'User'} Operation Blocked"
@@ -592,42 +879,26 @@ class AntiNukeManager:
 
         rec_key = f"security.antinuke.rec_{event_type}"
         default_recs = {
-            AntiNukeConstants.EVENT_BAN: "Audit recent ban entries in Server Settings -> Audit Log to identify affected members.",
-            AntiNukeConstants.EVENT_KICK: "Verify if executor account was compromised and revoke dangerous moderator roles.",
-            AntiNukeConstants.EVENT_BOT_ADD: "The unauthorized bot was removed. Audit who invited the bot and revoke Manage Server permissions.",
+            AntiNukeConstants.EVENT_BAN_ADD: "Audit recent bans in Server Settings -> Audit Log to identify affected members.",
+            AntiNukeConstants.EVENT_MEMBER_REMOVE: "Verify if executor account was compromised and revoke dangerous moderator roles.",
+            AntiNukeConstants.EVENT_BOT_ADD: "The unauthorized bot was expelled immediately. Audit who invited the bot.",
             AntiNukeConstants.EVENT_ROLE_DELETE: "Role deletion detected. Re-create the role and check role hierarchy.",
-            AntiNukeConstants.EVENT_ROLE_UPDATE: "Dangerous permissions were added. Revert role permissions and demote compromised accounts.",
-            AntiNukeConstants.EVENT_CHANNEL_DELETE: "Channel deletion burst blocked. Review backups and rotate moderator credentials.",
-            AntiNukeConstants.EVENT_CHANNEL_CREATE: "Spam channel creation detected. Clean up rogue channels.",
-            AntiNukeConstants.EVENT_WEBHOOK_CREATE: "Rogue webhook creation intercepted. Review channel Integrations to delete rogue webhooks.",
+            AntiNukeConstants.EVENT_ROLE_UPDATE: "Dangerous permissions were added. Revert role permissions immediately.",
+            AntiNukeConstants.EVENT_CHANNEL_DELETE: "Channel deletion burst blocked. Review channel audit logs and secure credentials.",
+            AntiNukeConstants.EVENT_WEBHOOKS_UPDATE: "Rogue webhook activity intercepted. Inspect channel integrations to purge rogue webhooks.",
         }
         recommendation = get_string(rec_key, default_recs.get(event_type, "Review recent server audit logs and secure staff accounts."))
 
-        alert_body = get_string(
-            "security.antinuke.alert_body",
-            (
-                f"• **Guild:** `{guild.name}` (`{guild.id}`)\n"
-                f"• **Attacker:** `{executor}` (`{executor.id}`)\n"
-                f"• **Category:** `{executor_type}`\n"
-                f"• **Action Detected:** `{event_type}`\n"
-                f"• **Rate:** `{count}` action(s) within `{window}s` (Threshold: {threshold})\n"
-                f"• **Punishment Taken:** **`{punishment.upper()}`**\n"
-                f"• **Logged At:** <t:{int(time.time())}:F>"
-            ),
-            guild_name=guild.name,
-            guild_id=guild.id,
-            executor_name=str(executor),
-            executor_id=executor.id,
-            executor_type=executor_type,
-            event_type=event_type,
-            count=count,
-            window=window,
-            threshold=threshold,
-            punishment=punishment.upper(),
-            timestamp=int(time.time()),
+        alert_body = (
+            f"• **Guild:** `{guild.name}` (`{guild.id}`)\n"
+            f"• **Culprit:** `{executor}` (`{executor.id}`)\n"
+            f"• **Category:** `{executor_type}`\n"
+            f"• **Event Triggered:** **{friendly_event}**\n"
+            f"• **Burst Rate:** `{count}` action(s) in `{window}s` (Threshold: {threshold})\n"
+            f"• **Disciplinary Action:** **`{punishment.upper()}`**\n"
+            f"• **Logged At:** <t:{int(time.time())}:F> (<t:{int(time.time())}:R>)"
         )
 
-        # Build Components V2 UI Container
         container = (
             ContainerBuilder()
             .set_accent_color(COLORS.get("error", "#B21F1F"))
@@ -636,23 +907,22 @@ class AntiNukeManager:
             .add_text_display(alert_body)
             .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
             .add_text_display(f"**Recommended Staff Action:**\n{recommendation}")
-            .set_footer(f"MomentumOne Security Platform • Incident Guard")
+            .set_footer(f"{settings.BOT_NAME} Security Sentinel • Incident Record")
             .build()
         )
 
-        # Attempt 1: Webhook logging
         if webhook_url:
             try:
                 async with aiohttp.ClientSession() as session:
                     payload = {
-                        "username": "MomentumOne Security Sentinel",
+                        "username": f"{settings.BOT_NAME} Security Sentinel",
                         "avatar_url": str(guild.me.display_avatar.url) if (guild.me and hasattr(guild.me, "display_avatar")) else None,
                         "embeds": [
                             {
                                 "title": alert_title,
                                 "description": f"{alert_body}\n\n**Recommended Staff Action:**\n{recommendation}",
                                 "color": int(COLORS.get("error", "#B21F1F").replace("#", ""), 16),
-                                "footer": {"text": "MomentumOne Security Platform • Webhook Log"},
+                                "footer": {"text": f"{settings.BOT_NAME} Security Platform • Webhook Log"},
                                 "timestamp": discord.utils.utcnow().isoformat(),
                             }
                         ]
@@ -660,12 +930,9 @@ class AntiNukeManager:
                     async with session.post(webhook_url, json=payload, timeout=5) as resp:
                         if resp.status in (200, 204):
                             return
-                        else:
-                            logger.warning(f"[AntiNuke] Webhook delivery failed with status {resp.status}. Falling back to bot channel message.")
             except Exception as w_err:
-                logger.warning(f"[AntiNuke] Webhook logging error: {w_err}. Falling back to channel send.")
+                logger.warning(f"[AntiNuke] Webhook logging failed: {w_err}")
 
-        # Attempt 2: Fallback to warning channel message
         if warning_channel_id:
             ch = guild.get_channel(int(warning_channel_id))
             if ch and hasattr(ch, "send"):
@@ -673,9 +940,3 @@ class AntiNukeManager:
                     await ch.send(view=container)
                 except Exception as ch_err:
                     logger.error(f"[AntiNuke] Failed to send alert message to channel {warning_channel_id}: {ch_err}")
-
-
-def datetime_timedelta(**kwargs):
-    """Helper for timedelta without importing datetime globally if not needed."""
-    import datetime
-    return datetime.timedelta(**kwargs)

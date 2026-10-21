@@ -91,11 +91,25 @@ class BotManager:
         from core.security.antinuke_service import AntiNukeService
 
         @self.client.event
+        async def on_guild_update(before: discord.Guild, after: discord.Guild):
+            try:
+                await AntiNukeService.on_guild_update(before, after)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_update: {err}")
+
+        @self.client.event
         async def on_member_ban(guild: discord.Guild, user: discord.User | discord.Member):
             try:
                 await AntiNukeService.on_member_ban(guild, user)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_member_ban: {err}")
+
+        @self.client.event
+        async def on_member_unban(guild: discord.Guild, user: discord.User | discord.Member):
+            try:
+                await AntiNukeService.on_member_unban(guild, user)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_member_unban: {err}")
 
         @self.client.event
         async def on_member_remove(member: discord.Member):
@@ -161,11 +175,88 @@ class BotManager:
                 logger.error(f"[AntiNuke] Error in on_guild_channel_update: {err}")
 
         @self.client.event
+        async def on_guild_emojis_update(guild: discord.Guild, before: Any, after: Any):
+            try:
+                await AntiNukeService.on_guild_emojis_update(guild, before, after)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_emojis_update: {err}")
+
+        @self.client.event
+        async def on_guild_stickers_update(guild: discord.Guild, before: Any, after: Any):
+            try:
+                await AntiNukeService.on_guild_stickers_update(guild, before, after)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_stickers_update: {err}")
+
+        @self.client.event
         async def on_webhooks_update(channel: discord.abc.GuildChannel):
             try:
                 await AntiNukeService.on_webhooks_update(channel)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_webhooks_update: {err}")
+
+        @self.client.event
+        async def on_invite_create(invite: discord.Invite):
+            try:
+                await AntiNukeService.on_invite_create(invite)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_invite_create: {err}")
+
+        @self.client.event
+        async def on_invite_delete(invite: discord.Invite):
+            try:
+                await AntiNukeService.on_invite_delete(invite)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_invite_delete: {err}")
+
+        @self.client.event
+        async def on_guild_integrations_update(guild: discord.Guild):
+            try:
+                await AntiNukeService.on_guild_integrations_update(guild)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_guild_integrations_update: {err}")
+
+        @self.client.event
+        async def on_auto_moderation_rule_create(rule: Any):
+            try:
+                await AntiNukeService.on_auto_moderation_rule_create(rule)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_auto_moderation_rule_create: {err}")
+
+        @self.client.event
+        async def on_auto_moderation_rule_update(rule: Any):
+            try:
+                await AntiNukeService.on_auto_moderation_rule_update(rule)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_auto_moderation_rule_update: {err}")
+
+        @self.client.event
+        async def on_auto_moderation_rule_delete(rule: Any):
+            try:
+                await AntiNukeService.on_auto_moderation_rule_delete(rule)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_auto_moderation_rule_delete: {err}")
+
+        @self.client.event
+        async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
+            try:
+                await AntiNukeService.on_audit_log_entry_create(entry)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_audit_log_entry_create: {err}")
+
+        @self.client.event
+        async def on_scheduled_event_delete(event: Any):
+            try:
+                await AntiNukeService.on_scheduled_event_delete(event)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_scheduled_event_delete: {err}")
+
+        @self.client.event
+        async def on_thread_delete(thread: discord.Thread):
+            try:
+                await AntiNukeService.on_thread_delete(thread)
+            except Exception as err:
+                logger.error(f"[AntiNuke] Error in on_thread_delete: {err}")
 
     async def setup(self) -> Dict[str, bool]:
         try:
