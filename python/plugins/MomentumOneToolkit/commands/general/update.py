@@ -25,10 +25,19 @@ def build_release_view(release_idx: int, session_id: str) -> Any:
     rel = CHANGELOG_RELEASES[idx]
     is_latest = (idx == 0)
 
-    title = get_string("commands.update.title", "🚀 MomentumOne System Changelog")
+    rocket_icon = EMOJIS.get("rocket") or "🚀"
+    title = get_string("commands.update.title", f"{rocket_icon} MomentumOne System Changelog")
     features_formatted = "\n".join(f"• {f}" for f in rel.get("features", []))
     bug_fixes = rel.get("bugFixes", [])
     bugs_formatted = "\n".join(f"• {b}" for b in bug_fixes) if bug_fixes else None
+
+    star_icon = EMOJIS.get("star") or "⭐"
+    latest_badge = get_string("commands.update.latest_badge", f"{star_icon} *(Latest)*")
+    hist_badge = get_string("commands.update.historical_badge", "*(Historical)*")
+    badge_str = latest_badge if is_latest else hist_badge
+
+    sparkles_icon = EMOJIS.get("sparkles") or "✨"
+    feat_heading = get_string("commands.update.features_heading", f"**{sparkles_icon} Key Capabilities & Features:**")
 
     container = (
         ContainerBuilder()
@@ -36,18 +45,20 @@ def build_release_view(release_idx: int, session_id: str) -> Any:
         .add_text_display(f"### {title} — v{rel['version']}")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_text_display(
-            f"**Release:** `v{rel['version']}` ({rel['codename']}) {'⭐ *(Latest)*' if is_latest else '*(Historical)*'}\n"
+            f"**Release:** `v{rel['version']}` ({rel['codename']}) {badge_str}\n"
             f"**Published:** `{rel.get('releasedAt', 'Recent')}`\n\n"
             f"_{rel.get('headline', '')}_\n\n"
             f"{rel.get('summary', '')}"
         )
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"**✨ Key Capabilities & Features:**\n{features_formatted}")
+        .add_text_display(f"{feat_heading}\n{features_formatted}")
     )
 
     if bugs_formatted:
+        wrench_icon = EMOJIS.get("wrench") or "🔧"
+        bugs_heading = get_string("commands.update.bugs_heading", f"**{wrench_icon} Bug Fixes & Stability:**")
         container.add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        container.add_text_display(f"**🛠️ Bug Fixes & Stability:**\n{bugs_formatted}")
+        container.add_text_display(f"{bugs_heading}\n{bugs_formatted}")
 
     container.set_footer(f"Version {rel['version']} • Released {rel.get('releasedAt')}")
 

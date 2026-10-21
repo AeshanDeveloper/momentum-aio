@@ -3,7 +3,7 @@ import discord
 from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 from shared.types.command_record import CommandType
 
 name = "server"
@@ -19,8 +19,7 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     guild = getattr(message, "guild", None)
 
     if not guild:
-        err = get_string("permissions.guild_only", "❌ This command can only be used inside a Discord server.")
-        return await send_response(message, err, ephemeral=True)
+        return await send_ui(message, "permissions.guild_only", style="warning")
 
     created_sec = int(guild.created_at.timestamp()) if hasattr(guild, "created_at") else 0
     members = getattr(guild, "member_count", None) or len(guild.members) if hasattr(guild, "members") else 1

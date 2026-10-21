@@ -24,6 +24,26 @@ class ButtonStyle(Enum):
     Success = discord.ButtonStyle.success
     Danger = discord.ButtonStyle.danger
     Link = discord.ButtonStyle.link
+    primary = discord.ButtonStyle.primary
+    secondary = discord.ButtonStyle.secondary
+    success = discord.ButtonStyle.success
+    danger = discord.ButtonStyle.danger
+    link = discord.ButtonStyle.link
+
+# Central backward compatibility for discord.ButtonStyle
+try:
+    _mc = type(discord.ButtonStyle)
+    for _cap, _low in [
+        ("Danger", "danger"),
+        ("Secondary", "secondary"),
+        ("Primary", "primary"),
+        ("Success", "success"),
+        ("Link", "link")
+    ]:
+        if not hasattr(_mc, _cap):
+            setattr(_mc, _cap, property(lambda cls, l=_low: getattr(cls, l)))
+except Exception:
+    pass
 
 
 class ButtonBuilder:
@@ -348,6 +368,11 @@ class ComponentCollector:
             return bool(target.match(cid)) or bool(getattr(target, "search", lambda s: False)(cid))
         s_target = str(target)
         return cid == s_target or cid.startswith(f"{s_target}:") or s_target.startswith(f"{cid}:")
+
+    def update_view(self, new_view: ComponentLayoutView) -> None:
+        self.view = new_view
+        new_view._collector = self
+        self._rewire_all()
 
     def _rewire_all(self) -> None:
         if self.global_handler:

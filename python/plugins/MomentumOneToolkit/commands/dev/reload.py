@@ -13,7 +13,7 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize
 )
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
 
 name = "reload"
@@ -41,8 +41,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
-        denied_msg = "❌ **Access Denied**: This command is restricted to the bot owner."
-        return await send_response(message, denied_msg, ephemeral=True)
+        return await send_ui(message, "permissions.owner_only", style="error")
 
     E = EMOJIS
     C = COLORS

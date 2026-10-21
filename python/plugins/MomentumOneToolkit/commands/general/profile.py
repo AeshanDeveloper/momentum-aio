@@ -60,7 +60,7 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     # Badges
     badges = []
     if is_bot_owner(target_id):
-        badges.append("👑 **Bot Developer / Owner**")
+        badges.append(get_string("commands.profile.badge_owner", f"{EMOJIS.get('owner', '👑')} **Bot Developer / Owner**"))
 
     member_role_str = "Member"
     if guild and target_member:
@@ -70,11 +70,13 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             member_role_str = "Server Administrator"
         elif getattr(getattr(target_member, "guild_permissions", None), "manage_guild", False):
             member_role_str = "Server Moderator"
-    badges.append(f"🛡️ **{member_role_str}**")
+    shield_icon = EMOJIS.get("shield") or EMOJIS.get("mod") or "🛡️"
+    badges.append(get_string("commands.profile.badge_role", f"{shield_icon} **{member_role_str}**", role=member_role_str))
 
     bl_status = BlacklistManager.is_user_blacklisted(target_id)
     if bl_status.get("blacklisted"):
-        badges.append("🚫 **System Blacklisted**")
+        ban_icon = EMOJIS.get("ban") or "🚫"
+        badges.append(get_string("commands.profile.badge_blacklisted", f"{ban_icon} **System Blacklisted**"))
 
     roles_str = "None"
     if target_member and hasattr(target_member, "roles"):

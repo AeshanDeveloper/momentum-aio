@@ -5,7 +5,7 @@ from config.settings import settings, COLORS, EMOJIS
 from apps.bot.discord.permissions.resolver import is_bot_owner
 from shared.types.command_record import CommandType
 from sdk.discord.builders import ContainerBuilder
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 
 name = "say"
 aliases = ["b", "echo"]
@@ -25,18 +25,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
-        denied_msg = "❌ **Access Denied**: This command is restricted to the bot owner."
-        return await send_response(message, denied_msg, ephemeral=True)
+        return await send_ui(message, "permissions.owner_only", style="error")
 
     say_message = " ".join(args).strip()
     if not say_message:
-        c = (
-            ContainerBuilder()
-            .set_accent_color(COLORS.get("default", "#3B82F6"))
-            .add_text_display("No text provided")
-            .build()
-        )
-        return await send_response(message, c)
+        return await send_ui(message, "commands.say.empty", style="warning")
 
     # Delete invoking message if possible
     if not is_slash and hasattr(message, "delete"):
@@ -50,4 +43,4 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         await channel.send(say_message, allowed_mentions=discord.AllowedMentions(users=True))
 
     if is_slash and hasattr(message, "response") and not message.response.is_done():
-        await message.response.send_message("Message sent.", ephemeral=True)
+        await send_ui(message, "commands.say.sent", style="success", ephemeral=True)

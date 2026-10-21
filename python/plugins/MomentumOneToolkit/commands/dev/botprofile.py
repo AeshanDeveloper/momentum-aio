@@ -9,6 +9,7 @@ from sdk.discord.builders import (
     ContainerBuilder,
     SeparatorSpacingSize,
 )
+from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
 import config;
 
@@ -48,13 +49,10 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             .add_text_display(description)
             .build()
         )
-        if is_slash and hasattr(message, "response") and not message.response.is_done():
-            return await message.response.send_message(embed=box.embed)
-        elif hasattr(message, "reply"):
-            return await message.reply(embed=box.embed)
+        return await send_response(message, box)
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
-        return await reply("Access Restricted", "This command is strictly restricted to bot owners.", True)
+        return await send_ui(message, "permissions.owner_only")
 
     def show_usage():
         usage_text = "\n".join([

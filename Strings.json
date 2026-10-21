@@ -319,6 +319,57 @@
         "description": "{emoji:unlock} Channel <#{channel_id}> has been unlocked.",
         "style": "success"
       },
+      "slowmode": {
+        "title": "{emoji:cooldown} Channel Slowmode Updated",
+        "description": "{emoji:check} Slowmode for <#{channel_id}> has been set to `{seconds}s`.",
+        "disabled_description": "{emoji:check} Slowmode for <#{channel_id}> has been disabled.",
+        "style": "success"
+      },
+      "slowmode_invalid": {
+        "title": "{emoji:warning} Invalid Slowmode Duration",
+        "description": "{emoji:cross} Slowmode duration must be between 0 seconds and 21,600 seconds (6 hours). Example: `10s`, `5m`, `1h`, or `0` to disable.",
+        "style": "warning"
+      },
+      "hidden": {
+        "title": "{emoji:lock} Channel Hidden",
+        "description": "{emoji:lock} Channel <#{channel_id}> is now hidden from the `@everyone` role.",
+        "style": "warning"
+      },
+      "unhidden": {
+        "title": "{emoji:unlock} Channel Unhidden",
+        "description": "{emoji:unlock} Channel <#{channel_id}> is now visible to the `@everyone` role.",
+        "style": "success"
+      },
+      "deleted": {
+        "title": "{emoji:trash} Channel Deleted",
+        "description": "{emoji:check} Channel `#{name}` has been deleted.",
+        "style": "success"
+      },
+      "nuked": {
+        "title": "{emoji:bomb} Channel Nuked",
+        "description": "{emoji:check} Channel has been nuked and recreated successfully.",
+        "style": "success"
+      },
+      "nuke_in_progress": {
+        "title": "{emoji:warning} Nuke In Progress",
+        "description": "{emoji:warning} A nuke operation is already running for <#{channel_id}>.",
+        "style": "warning"
+      },
+      "bot_missing_perms": {
+        "title": "{emoji:denied} Missing Permissions",
+        "description": "{emoji:cross} The bot lacks required permission(s) to manage channel <#{channel_id}>.",
+        "style": "error"
+      },
+      "channel_not_found": {
+        "title": "{emoji:warning} Channel Not Found",
+        "description": "{emoji:cross} Could not locate the specified channel. Please provide a valid channel mention or ID.",
+        "style": "warning"
+      },
+      "not_text": {
+        "title": "{emoji:warning} Unsupported Channel Type",
+        "description": "{emoji:cross} This operation can only be executed on text channels.",
+        "style": "warning"
+      },
       "info_title": "{emoji:chart} Channel Metrics: #{name}",
       "id": "• **Channel ID:** `{channel_id}`",
       "type": "• **Type:** `{channel_type}`",
@@ -506,7 +557,15 @@
       "overview_desc": "Manage persistent global restrictions across the entire bot platform.\n\n• **Active Blacklisted Users:** `{user_count}`\n• **Active Blacklisted Servers:** `{guild_count}`",
       "user_heading": "User Restrictions",
       "server_heading": "Server Restrictions",
-      "empty": "No restrictions currently active."
+      "empty": "No restrictions currently active.",
+      "user_add_dm_title": "{emoji:ban} Notice of Platform Blacklist",
+      "user_add_dm_desc": "Your Discord account (`{user_id}`) has been added to the MomentumOne global blacklist.\n\n• **Action:** Account Restricted\n• **Reason:** {reason}\n• **Expires:** {expires}\n\nYou will not be able to execute commands across any server serviced by MomentumOne.",
+      "user_remove_dm_title": "{emoji:success} Notice of Blacklist Removal",
+      "user_remove_dm_desc": "Your account (`{user_id}`) has been removed from the MomentumOne global blacklist. Your command privileges have been restored.",
+      "server_add_dm_title": "{emoji:ban} Notice of Server Blacklist",
+      "server_add_dm_desc": "Your server **{guild_name}** (`{guild_id}`) has been added to the MomentumOne global blacklist.\n\n• **Action:** Guild Services Suspended\n• **Reason:** {reason}\n• **Expires:** {expires}\n\nMomentumOne services are restricted in this guild.",
+      "server_remove_dm_title": "{emoji:success} Notice of Server Blacklist Removal",
+      "server_remove_dm_desc": "Your server **{guild_name}** (`{guild_id}`) has been removed from the MomentumOne global blacklist. Services have been restored."
     },
     "unblacklist": {
       "overview_title": "{emoji:shield} Global Unblacklist System",
@@ -519,7 +578,18 @@
     },
     "noprefix": {
       "overview_title": "{emoji:key} No-Prefix Authorization System",
-      "overview_desc": "Manage users permitted to execute commands without requiring the `{prefix}` prefix.\n\n• **Total Authorized Users:** `{count}`"
+      "overview_desc": "Manage users permitted to execute commands without requiring the `{prefix}` prefix.\n\n• **Total Authorized Users:** `{count}`",
+      "status_title": "{emoji:key} No-Prefix System Status",
+      "status_desc": "• **Runtime No-Prefix System:** {status_icon} `{status}`\n• **Registered User Accounts:** `{user_count}`\n• **Registered Server Overrides:** `{guild_count}`\n\nUse `$noprefix status enable` or `$noprefix status disable` to toggle.",
+      "status_toggled": "{emoji:check} No-Prefix system status changed to `{status}`.",
+      "user_add_dm_title": "{emoji:key} No-Prefix Access Granted",
+      "user_add_dm_desc": "You have been granted **No-Prefix** command execution privileges on MomentumOne.\n\n• **Duration:** {duration}\n• **Granted by:** <@{admin_id}>\n\nYou may now execute bot commands without prepending the bot prefix.",
+      "user_remove_dm_title": "{emoji:key} No-Prefix Access Revoked",
+      "user_remove_dm_desc": "Your **No-Prefix** privileges on MomentumOne have ended. Please use the server prefix to execute commands.",
+      "server_add_dm_title": "{emoji:key} Server No-Prefix Enabled",
+      "server_add_dm_desc": "Your server **{guild_name}** (`{guild_id}`) has been granted server-wide **No-Prefix** privileges for MomentumOne commands.",
+      "server_remove_dm_title": "{emoji:key} Server No-Prefix Removed",
+      "server_remove_dm_desc": "Server-wide **No-Prefix** privileges for **{guild_name}** (`{guild_id}`) have been revoked."
     },
     "botprofile": {
       "title": "{emoji:bot} Bot Profile Management",

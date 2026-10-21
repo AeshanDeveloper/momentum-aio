@@ -19,7 +19,7 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SeparatorSpacingSize
 )
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
 
 VERSION = "26.7.20"
@@ -127,8 +127,9 @@ def build_overview_panel(metrics: Dict[str, Any], colors: Dict[str, str], emojis
         else f"{emojis['disabled']} Inactive (Set GEMINI_API_KEY)"
     )
 
+    stats_icon = emojis.get("stats") or EMOJIS.get("stats")
     c.add_text_display(
-        f"📊 **Observability & Intelligence**\n"
+        f"{stats_icon} **Observability & Intelligence**\n"
         f"• **GA4 Analytics:** {emojis['disabled']} Inactive (Set GA4_MEASUREMENT_ID & GA4_API_SECRET)\n"
         f"• **Webhook Logging:** {emojis['disabled']} Inactive (Set DISCORD_LOG_WEBHOOK_URL)\n"
         f"• **Gemini AI Engine:** {ai_text}\n"
@@ -251,21 +252,22 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     C = COLORS
 
     emojis = {
-        "bot": E.get("bot") or "🤖",
-        "server": E.get("server") or "🖥️",
-        "wallet": E.get("wallet") or "💼",
-        "error": E.get("error") or "❌",
-        "success": E.get("success") or "✅",
-        "warning": E.get("warning") or "⚠️",
-        "loading": E.get("loading") or "⏳",
-        "history": E.get("history") or "📜",
-        "commands": E.get("commands") or "⚡",
-        "reset": E.get("reset") or "🔄",
-        "enabled": E.get("enabled") or "🟢",
-        "disabled": E.get("disabled") or "🔴",
-        "info": E.get("info") or "ℹ️",
-        "user": E.get("user") or "👤",
-        "cancel": E.get("cancel") or "✖️",
+        "bot": E.get("bot"),
+        "server": E.get("server"),
+        "wallet": E.get("wallet"),
+        "error": E.get("error"),
+        "success": E.get("success"),
+        "warning": E.get("warning"),
+        "loading": E.get("loading"),
+        "history": E.get("history"),
+        "commands": E.get("commands"),
+        "reset": E.get("reset"),
+        "enabled": E.get("enabled"),
+        "disabled": E.get("disabled"),
+        "info": E.get("info"),
+        "user": E.get("user"),
+        "cancel": E.get("cancel"),
+        "stats": E.get("stats") or E.get("chart"),
     }
 
     colors = {
@@ -276,15 +278,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     }
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
-        deny_container = (
-            ContainerBuilder()
-            .set_accent_color(colors["error"])
-            .add_text_display(f"### {emojis['error']} Access Restricted")
-            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-            .add_text_display("This operational control panel is strictly restricted to authorized bot owners.")
-            .build()
-        )
-        return await send_response(message, deny_container, ephemeral=True)
+        return await send_ui(message, "permissions.owner_only", ephemeral=True, style="error")
 
     current_view = "overview"
     action_prefix = f"ops_{author_id}_{id(message)}"

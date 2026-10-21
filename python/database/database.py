@@ -60,6 +60,55 @@ def _matches_filter(doc: Dict[str, Any], filter_dict: Dict[str, Any]) -> bool:
             return False
     return True
 
+class MockCursor:
+    def __init__(self, items: List[Dict[str, Any]]):
+        self._items = list(items)
+        self._skip = 0
+        self._limit = None
+
+    def sort(self, key_or_list: Any, direction: int = 1) -> "MockCursor":
+        if isinstance(key_or_list, list):
+            for k, d in reversed(key_or_list):
+                self._items.sort(key=lambda x: (x.get(k) is None, x.get(k)), reverse=(d < 0))
+        elif isinstance(key_or_list, dict):
+            for k, d in reversed(list(key_or_list.items())):
+                self._items.sort(key=lambda x: (x.get(k) is None, x.get(k)), reverse=(d < 0))
+        elif isinstance(key_or_list, str):
+            self._items.sort(key=lambda x: (x.get(key_or_list) is None, x.get(key_or_list)), reverse=(direction < 0))
+        return self
+
+    def skip(self, n: int) -> "MockCursor":
+        self._skip = max(0, int(n))
+        return self
+
+    def limit(self, n: int) -> "MockCursor":
+        self._limit = max(0, int(n))
+        return self
+
+    def _get_sliced(self) -> List[Dict[str, Any]]:
+        res = self._items[self._skip:]
+        if self._limit is not None:
+            res = res[:self._limit]
+        return res
+
+    async def to_list(self, length: Optional[int] = None) -> List[Dict[str, Any]]:
+        res = self._get_sliced()
+        if length is not None:
+            return res[:length]
+        return res
+
+    def __aiter__(self):
+        async def _gen():
+            for item in self._get_sliced():
+                yield item
+        return _gen()
+
+    def __await__(self):
+        async def _await_helper():
+            return self._get_sliced()
+        return _await_helper().__await__()
+
+
 class MockCollection:
     def __init__(self, name: str, memory_store: Dict[str, List[Dict[str, Any]]]):
         self.name = name
@@ -77,19 +126,23 @@ class MockCollection:
                 return dict(item)
         return None
 
-    async def find(
+    def find(
         self,
         filter_dict: Optional[Dict[str, Any]] = None,
-        sort: Optional[Dict[str, int]] = None,
+        sort: Optional[Any] = None,
         skip: int = 0,
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
+        limit: Optional[int] = None
+    ) -> MockCursor:
         filter_dict = filter_dict or {}
         matches = [dict(item) for item in self._get_items() if _matches_filter(item, filter_dict)]
+        cursor = MockCursor(matches)
         if sort:
-            for k, direction in reversed(list(sort.items())):
-                matches.sort(key=lambda x: (x.get(k) is None, x.get(k)), reverse=(direction < 0))
-        return matches[skip : skip + limit]
+            cursor.sort(sort)
+        if skip:
+            cursor.skip(skip)
+        if limit is not None:
+            cursor.limit(limit)
+        return cursor
 
     async def insert_one(self, doc: Dict[str, Any]) -> Dict[str, Any]:
         item = dict(doc)

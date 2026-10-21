@@ -12,7 +12,7 @@ from sdk.discord.builders import (
     ButtonBuilder,
     SeparatorSpacingSize
 )
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
 
 name = "reboot"
@@ -34,8 +34,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     bot_name = settings.BOT_NAME
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
-        denied_msg = "❌ **Access Denied**: This command is restricted to the bot owner."
-        return await send_response(message, denied_msg, ephemeral=True)
+        return await send_ui(message, "permissions.owner_only", style="error")
 
     reload_emoji = EMOJIS.get("reload") or EMOJIS.get("refresh") or "🔄"
     dot_emoji = EMOJIS.get("info") or "•"

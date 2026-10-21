@@ -15,7 +15,7 @@ from sdk.discord.builders import (
     ContainerBuilder,
     SeparatorSpacingSize
 )
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
 
 
@@ -75,8 +75,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     owner_ids = settings.OWNER_IDS
 
     if not is_bot_owner(author_id) and author_id not in owner_ids:
-        denied_text = "❌ **Access Denied**: The `eval` command is strictly restricted to authorized bot owners."
-        return await send_response(message, denied_text, ephemeral=True)
+        return await send_ui(message, "permissions.owner_only", style="error")
 
     raw_code = " ".join(args).strip()
     clean_code = raw_code
@@ -89,8 +88,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         clean_code = "\n".join(lines).strip()
 
     if not clean_code:
-        err_text = "❌ **Missing Code**: Please provide a Python expression or script to evaluate."
-        return await send_response(message, err_text, ephemeral=True)
+        return await send_ui(message, "commands.eval.missing_code", style="error")
 
     start_time = time.perf_counter()
     result = None
@@ -143,7 +141,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     c_success = colors.get("success", "#10B981")
     c_error = colors.get("error", "#EF4444")
 
-    title_icon = "❌ Evaluation Error" if is_error else "⚡ Python Evaluation"
+    title_icon = f"{EMOJIS.get('error', '❌')} Evaluation Error" if is_error else f"{EMOJIS.get('eval', '⚡')} Python Evaluation"
     container = (
         ContainerBuilder()
         .set_accent_color(c_error if is_error else c_success)

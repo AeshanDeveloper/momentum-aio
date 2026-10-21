@@ -15,7 +15,7 @@ from sdk.discord.builders import (
     SelectMenuTypes,
     SeparatorSpacingSize,
 )
-from sdk.discord.response import send_response
+from sdk.discord.response import send_response, send_ui
 
 from discord import MessageFlags, ButtonStyle
 
@@ -44,8 +44,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     guild = getattr(message, "guild", None)
 
     if not guild:
-        text = "❌ This command can only be used inside a Discord server."
-        return await send_response(message, text, ephemeral=True)
+        return await send_ui(message, "permissions.guild_only", ephemeral=True, style="warning")
 
     user = getattr(message, "author", None) or getattr(message, "user", None)
     member = getattr(message, "member", None) or (await guild.fetch_member(user.id) if user and hasattr(guild, "fetch_member") else None)
@@ -63,15 +62,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     c_default = colors.get("default", "#5865F2")
 
     if not has_admin:
-        deny_box = (
-            ContainerBuilder()
-            .set_accent_color(c_error)
-            .add_text_display("### 🚫 Permission Denied")
-            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-            .add_text_display("You need **Manage Server** or **Administrator** permissions to manage server commands.")
-            .build()
-        )
-        return await send_response(message, deny_box, ephemeral=True)
+        return await send_ui(message, "permissions.admin_only", ephemeral=True, style="error")
 
     subcommand = args[0].lower() if args else None
     target_cmd = args[1].lower() if len(args) > 1 else None
@@ -79,10 +70,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     # Handle direct subcommands: disable / enable
     if subcommand == "disable" and target_cmd:
         result = ServerCommandManager.disable_command(str(guild.id), target_cmd, str(user.id) if user else None)
+        status_icon = EMOJIS.get("check") if result.get("success") else EMOJIS.get("cross")
         box = (
             ContainerBuilder()
             .set_accent_color(c_success if result.get("success") else c_error)
-            .add_text_display(f"### {'✅ Command Disabled' if result.get('success') else '❌ Action Failed'}")
+            .add_text_display(f"### {status_icon} {'Command Disabled' if result.get('success') else 'Action Failed'}")
             .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
             .add_text_display(result.get("message", ""))
             .build()
@@ -91,10 +83,11 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
 
     if subcommand == "enable" and target_cmd:
         result = ServerCommandManager.enable_command(str(guild.id), target_cmd, str(user.id) if user else None)
+        status_icon = EMOJIS.get("check") if result.get("success") else EMOJIS.get("cross")
         box = (
             ContainerBuilder()
             .set_accent_color(c_success if result.get("success") else c_error)
-            .add_text_display(f"### {'✅ Command Re-Enabled' if result.get('success') else '❌ Action Failed'}")
+            .add_text_display(f"### {status_icon} {'Command Re-Enabled' if result.get('success') else 'Action Failed'}")
             .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
             .add_text_display(result.get("message", ""))
             .build()
@@ -126,7 +119,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
         container = (
             ContainerBuilder()
             .set_accent_color(c_default)
-            .add_text_display(f"### ⚙️ Server Command Management — {guild.name}")
+            .add_text_display(f"### {EMOJIS.get('settings')} Server Command Management — {guild.name}")
             .add_text_display(
                 f"Configure which commands are active in **{guild.name}**.\n\n"
                 f"• **Total Manageable Commands:** `{len(all_commands)}`\n"
@@ -141,9 +134,9 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
             c_name = cmd.get("name", "")
             is_disabled = (c_name.lower() in disabled_commands)
             status_badge = (
-                "🔒 `ESSENTIAL (Protected)`"
+                f"{EMOJIS.get('lock')} `ESSENTIAL (Protected)`"
                 if cmd.get("essential")
-                else ("🔴 `DISABLED`" if is_disabled else "🟢 `ENABLED`")
+                else (f"{EMOJIS.get('disabled')} `DISABLED`" if is_disabled else f"{EMOJIS.get('enabled')} `ENABLED`")
             )
             desc_text = cmd.get("description", "")[:100]
             container.add_text_display(
@@ -166,7 +159,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
                     "label": f"/{c_name} ({'Disabled' if is_dis else 'Enabled'})",
                     "description": f"Click to enable /{c_name}" if is_dis else f"Click to disable /{c_name}",
                     "value": c_name,
-                    "emoji": "🟢" if is_dis else "🔴",
+                    "emoji": EMOJIS.get("enabled") if is_dis else EMOJIS.get("disabled"),
                 })
 
             container.add_action_row(

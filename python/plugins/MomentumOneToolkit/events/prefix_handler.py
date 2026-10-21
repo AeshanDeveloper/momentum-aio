@@ -58,7 +58,8 @@ async def execute(ctx: Any, message: discord.Message):
         if matched_prefix:
             content = message.content[len(matched_prefix):].strip()
         else:
-            if NoPrefixManager.has_no_prefix(str(message.author.id)):
+            guild_id_str = str(message.guild.id) if message.guild else None
+            if NoPrefixManager.has_no_prefix(str(message.author.id), guild_id_str):
                 content = message.content.strip()
                 is_no_prefix = True
             else:
