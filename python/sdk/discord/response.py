@@ -96,6 +96,9 @@ async def send_response(
     if "view" in kwargs:
         kwargs.pop("embed", None)
         kwargs.pop("content", None)
+        v = kwargs.get("view")
+        if hasattr(v, "deduplicate_custom_ids"):
+            v.deduplicate_custom_ids()
 
     try:
         if isinstance(target, discord.Interaction) or hasattr(target, "response"):

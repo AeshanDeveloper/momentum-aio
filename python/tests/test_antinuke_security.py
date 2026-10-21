@@ -256,6 +256,62 @@ class TestAntiNukeSecurity(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(AntiNukeManager.is_setup_completed(mock_guild.id))
 
+    async def test_no_duplicate_custom_ids(self):
+        """Verifies that all views and dashboards generate strictly unique custom IDs across all components."""
+        from plugins.MomentumOneToolkit.commands.security.antinuke import build_dashboard_view
+        from plugins.MomentumOneToolkit.commands.security.setup import (
+            build_wizard_step1_view,
+            build_wizard_step2_view,
+            build_wizard_step3_view,
+            build_wizard_step4_view,
+            build_wizard_step5_view,
+            build_wizard_step6_view,
+        )
+        from plugins.MomentumOneToolkit.commands.security.whitelist import build_whitelist_type_picker_view
+        from plugins.MomentumOneToolkit.commands.security.punishment import build_punishment_overview_view
+
+        mock_guild = MagicMock()
+        mock_guild.id = 77777
+        mock_guild.name = "ID Uniqueness Test Guild"
+        mock_guild.owner_id = 99999
+        mock_guild.me = MagicMock()
+        mock_guild.me.top_role.position = 50
+        mock_guild.roles = []
+
+        views_to_test = []
+
+        # 1. Dashboard when setup is incomplete
+        await AntiNukeManager.save_guild_config(str(mock_guild.id), {"setup_completed": False, "enabled": False})
+        dash_unconfigured = await build_dashboard_view(mock_guild)
+        views_to_test.append(("Dashboard (unconfigured)", dash_unconfigured))
+
+        # 2. Dashboard when setup is complete and enabled
+        await AntiNukeManager.save_guild_config(str(mock_guild.id), {"setup_completed": True, "enabled": True})
+        dash_configured = await build_dashboard_view(mock_guild)
+        views_to_test.append(("Dashboard (configured)", dash_configured))
+
+        # 3. Wizard steps
+        views_to_test.append(("Wizard Step 1", await build_wizard_step1_view(mock_guild)))
+        views_to_test.append(("Wizard Step 2", await build_wizard_step2_view(mock_guild)))
+        views_to_test.append(("Wizard Step 3", await build_wizard_step3_view(mock_guild)))
+        views_to_test.append(("Wizard Step 4", await build_wizard_step4_view(mock_guild)))
+        views_to_test.append(("Wizard Step 5", await build_wizard_step5_view(mock_guild, current_ch_id=12345)))
+        views_to_test.append(("Wizard Step 6", await build_wizard_step6_view(mock_guild)))
+
+        # 4. Whitelist & Punishment views
+        views_to_test.append(("Whitelist Type Picker", await build_whitelist_type_picker_view(mock_guild)))
+        views_to_test.append(("Punishment Overview", await build_punishment_overview_view(mock_guild)))
+
+        for label, view in views_to_test:
+            interactive = view.get_interactive_components()
+            custom_ids = [getattr(c, "custom_id", None) for c in interactive if getattr(c, "custom_id", None)]
+            duplicate_ids = [cid for cid in custom_ids if custom_ids.count(cid) > 1]
+            self.assertEqual(
+                len(custom_ids),
+                len(set(custom_ids)),
+                f"Duplicate custom_id found in {label}: {set(duplicate_ids)}"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

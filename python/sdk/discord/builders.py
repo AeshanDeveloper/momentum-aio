@@ -440,6 +440,24 @@ class ComponentLayoutView(discord.ui.LayoutView):
                 items.append(child)
         return items
 
+    def deduplicate_custom_ids(self) -> None:
+        """Ensures all interactive components across the layout view have strictly unique custom_ids."""
+        seen: set = set()
+        for comp in self.get_interactive_components():
+            cid = getattr(comp, "custom_id", None)
+            if cid:
+                cid_str = str(cid)
+                if cid_str in seen:
+                    count = 2
+                    cand = f"{cid_str[:90]}_{count}"
+                    while cand in seen:
+                        count += 1
+                        cand = f"{cid_str[:90]}_{count}"
+                    comp.custom_id = cand
+                    seen.add(cand)
+                else:
+                    seen.add(cid_str)
+
     def create_message_component_collector(
         self,
         target_message: Any = None,
@@ -551,6 +569,7 @@ class ContainerBuilder:
         view = ComponentLayoutView(timeout=self._timeout)
         container = self.build_container()
         view.add_item(container)
+        view.deduplicate_custom_ids()
         return view
 
     def build_view(self) -> ComponentLayoutView:

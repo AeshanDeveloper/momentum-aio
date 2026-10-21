@@ -95,6 +95,13 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
             .set_style(ButtonStyle.Danger if is_enabled else ButtonStyle.Success)
             .set_emoji(EMOJIS.get("shield", "🛡️"))
         )
+        action_row_1.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step1:{guild.id}")
+            .set_label("Re-Run Wizard")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("wrench", "🔧"))
+        )
     else:
         action_row_1.add_button(
             ButtonBuilder()
@@ -104,13 +111,6 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
             .set_emoji(EMOJIS.get("wrench", "🔧"))
         )
 
-    action_row_1.add_button(
-        ButtonBuilder()
-        .set_custom_id(f"an_wiz:step1:{guild.id}")
-        .set_label("Setup Wizard")
-        .set_style(ButtonStyle.Primary)
-        .set_emoji(EMOJIS.get("wrench", "🔧"))
-    )
     action_row_1.add_button(
         ButtonBuilder()
         .set_custom_id(f"an_wl:manage:{guild.id}")
