@@ -156,13 +156,21 @@
             "dashboard_desc": "Enterprise server protection monitoring destructive actions in real-time.",
             "mode_names": {
                 "hard": "Hard Zero-Tolerance",
-                "ultimate": "Ultimate Defence Wall",
-                "hybrid": "Hybrid Dynamic Defense"
+                "ultimate": "Ultimate Defence Wall (Unavailable)",
+                "hybrid": "Hybrid Dynamic Defense (Unavailable)"
             },
             "mode_descriptions": {
-                "hard": "Immediate zero-tolerance response. 1 unauthorized action triggers immediate permanent ban.",
-                "ultimate": "Configurable burst detection (Ultimate Defence Wall). Neutralizes high-speed attacks with automatic role quarantine and recovery.",
-                "hybrid": "Combines instant zero-tolerance bans on bot additions and rogue permissions with sliding-window burst defense on channels/roles."
+                "hard": "Strict protection against suspicious destructive server changes, applying the configured thresholds and punishments.",
+                "ultimate": "Reserved for a future advanced protection system; currently unavailable.",
+                "hybrid": "Reserved for a future combination of security modes; currently unavailable."
+            },
+            "punishment_definitions": {
+                "ban": "Ban the attributed actor when permitted.",
+                "kick": "Remove the attributed actor from the server when permitted.",
+                "timeout": "Apply a supported Discord timeout to the attributed actor.",
+                "prune": "Use only a clearly defined, supported member-removal action; do not silently equate pruning with banning or bulk-delete messages.",
+                "strip_roles": "Remove eligible roles from the attributed actor, respecting Discord's role hierarchy and permissions.",
+                "quarantine": "Disabled; reserved for future implementation."
             },
             "status_active": "{emoji:enabled} Anti-Nuke is **ACTIVE** (Mode: `{mode}`)",
             "status_disabled": "{emoji:disabled} Anti-Nuke is currently **DISABLED**",

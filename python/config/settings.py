@@ -33,11 +33,12 @@ class Settings:
     OWNER_IDS: List[str] = [x.strip() for x in os.getenv("OWNER_IDS", os.getenv("OWNER_ID", "")).split(",") if x.strip()]
     BLACKLIST_EXCLUSIONS: List[str] = [x.strip() for x in os.getenv("BLACKLIST_EXCLUSIONS", "").split(",") if x.strip()]
     
-    # Intervals (ms)
-    CACHE_TTL: int = 60_000
-    BLACKLIST_CACHE_SYNC: int = 60_000
-    NO_PREFIX_CACHE_SYNC: int = 60_000
-    ANTI_SPAM_WINDOW: int = 30_000
+    # Anti-Nuke Feature Flags
+    ANTINUKE_MODES_ENABLED: List[str] = [
+        x.strip().lower()
+        for x in os.getenv("ANTINUKE_MODES_ENABLED", "hard").split(",")
+        if x.strip()
+    ]
 
 settings = Settings()
 
