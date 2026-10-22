@@ -40,6 +40,8 @@ class BotManager:
         self.plugins = PluginManager(self.plugin_context)
         self._is_ready = False
         self._started_at = None
+        self._is_setup = False
+        self._event_hooks_setup = False
 
         # Hook DiscordTelemetry
         DiscordTelemetry.hook(self.client)
@@ -48,6 +50,9 @@ class BotManager:
         self._setup_event_hooks()
 
     def _setup_event_hooks(self) -> None:
+        if self._event_hooks_setup:
+            return
+        self._event_hooks_setup = True
         @self.client.event
         async def on_ready():
             self._is_ready = True
@@ -259,6 +264,8 @@ class BotManager:
                 logger.error(f"[AntiNuke] Error in on_thread_delete: {err}")
 
     async def setup(self) -> Dict[str, bool]:
+        if self._is_setup:
+            return {"ready": True}
         try:
             # 1. Discover and load plugins
             from plugins.MomentumOneToolkit import Plugin as ToolkitPlugin
@@ -285,6 +292,7 @@ class BotManager:
                 f"{len(reg_events)} total event listeners registered ({len(antinuke_events)} security listeners). "
                 f"Enabled security modes: {AntiNukeConstants.get_enabled_modes()}"
             )
+            self._is_setup = True
             return {"ready": True}
         except Exception as err:
             logger.error(f"[BotManager] Setup failure: {err}")
@@ -296,10 +304,11 @@ class BotManager:
             logger.info("[BOT] Discord bot token (BOT_TOKEN) is not configured. Running offline.")
             return
 
-        setup_res = await self.setup()
-        if not setup_res.get("ready"):
-            logger.error("[BOT] Setup failed; aborting login.")
-            return
+        if not self._is_setup:
+            setup_res = await self.setup()
+            if not setup_res.get("ready"):
+                logger.error("[BOT] Setup failed; aborting login.")
+                return
 
         logger.info("[BOT] Attempting Discord gateway connection...")
         try:
@@ -335,3 +344,4 @@ class BotManager:
     async def logout(self) -> None:
         if not self.client.is_closed():
             await self.client.close()
+        self._is_setup = False

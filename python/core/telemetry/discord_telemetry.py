@@ -9,6 +9,8 @@ class DiscordTelemetry:
 
     @classmethod
     def hook(cls, client: Any) -> None:
+        if cls._hooked and cls._client is client:
+            return
         cls._client = client
         cls._hooked = True
         logger.info("[DiscordTelemetry] Telemetry hooks attached to Discord client.")

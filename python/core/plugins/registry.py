@@ -16,6 +16,12 @@ class PluginRegistry:
         self._plugins: Dict[str, PluginRecord] = {}
 
     def register(self, plugin_id: str, manifest: Dict[str, Any], instance: Any) -> Dict[str, Any]:
+        if plugin_id in self._plugins:
+            return {
+                "success": True,
+                "is_registered": True,
+                "plugin_id": plugin_id,
+            }
         logger.info(f"[PluginRegistry] Registering plugin '{manifest.get('name', plugin_id)}' (v{manifest.get('version', '1.0.0')})")
         record = PluginRecord(plugin_id=plugin_id, manifest=manifest, instance=instance)
         self._plugins[plugin_id] = record

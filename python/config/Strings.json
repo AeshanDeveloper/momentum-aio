@@ -152,7 +152,7 @@
             "style": "info"
         },
         "antinuke": {
-            "title": "{emoji:shield} Anti-Nuke Security System",
+            "title": "{emoji:shield} Anti-Nuke Control Center",
             "dashboard_desc": "Enterprise server protection monitoring destructive actions in real-time.",
             "mode_names": {
                 "hard": "Hard Zero-Tolerance",
@@ -219,8 +219,8 @@
             "warning_channel_set": "{emoji:check} Security warning & alert channel set to <#{channel_id}>.",
             "log_channel_set": "{emoji:check} Security log channel set to <#{channel_id}>.",
             "webhook_set": "{emoji:check} Security logging webhook set to `{url}`.",
-            "alert_title_user": "{emoji:danger} Forensic Alert: Suspicious User Attack Intercepted",
-            "alert_title_bot": "{emoji:bot} Forensic Alert: Unauthorized Bot Operation Blocked",
+            "alert_title_user": "Forensic Alert: Unauthorized User Operation Blocked",
+            "alert_title_bot": "Forensic Alert: Unauthorized Bot Operation Blocked",
             "alert_body": "• **Guild:** `{guild_name}` (`{guild_id}`)\n• **Attacker:** `{executor_name}` (`{executor_id}`)\n• **Category:** `{executor_type}`\n• **Action Detected:** `{event_type}`\n• **Rate:** `{count}` action(s) within `{window}s` (Threshold: {threshold})\n• **Punishment Taken:** **`{punishment}`**\n• **Logged At:** <t:{timestamp}:F> (<t:{timestamp}:R>)",
             "alert_remediation_title": "{emoji:wrench} Forensic Details & Recommended Staff Action:",
             "rec_ban": "Review recent bans in server audit log and unban any legitimately banned members if necessary.",
@@ -233,113 +233,112 @@
             "rec_webhook_create": "Unauthorized webhook created. Immediately delete rogue webhooks in channel settings to prevent spam/phishing.",
             "setup_required": {
                 "title": "{emoji:shield} Anti-Nuke Setup Required",
-                "description": "{emoji:warning} Anti-Nuke protection has not been initialized for this server.\n\nAll anti-nuke controls, whitelists, and real-time monitoring are locked until the interactive Setup Wizard is completed.\n\nUse `$setup` or `$antinuke setup` to begin the guided security configuration.",
-                "footer": "{bot_name} Security Architecture • Setup Enforcement"
+                "description": "{emoji:warning} Anti-Nuke protection has not been initialized for this server.\n\nTo prevent misconfiguration and accidental lockouts, all anti-nuke controls, whitelists, and real-time monitoring are locked until the interactive Setup Wizard is completed.\n\nUse `$setup` or `$antinuke setup` to begin the guided security configuration."
             },
             "events": {
                 "guildUpdate": {
-                    "name": "Server Settings Modified",
-                    "desc": "Unauthorized changes to server name, vanity URL, icon, or critical settings."
+                    "name": "Server Settings Updated",
+                    "desc": "Monitors changes to server name, vanity URL, verification level, or widget."
                 },
                 "channelCreate": {
                     "name": "Channel Created",
-                    "desc": "Mass creation of channels or unauthorized channel flooding."
+                    "desc": "Monitors creation of text, voice, announcement, and forum channels."
                 },
                 "channelUpdate": {
-                    "name": "Channel Modified",
-                    "desc": "Altering channel permissions, overwrites, or channel names."
+                    "name": "Channel Updated",
+                    "desc": "Monitors modifications to channel permissions, names, topics, or overwrites."
                 },
                 "channelDelete": {
                     "name": "Channel Deleted",
-                    "desc": "Destructive deletion of server channels or categories."
+                    "desc": "Monitors deletion of server channels and categories."
                 },
                 "roleCreate": {
                     "name": "Role Created",
-                    "desc": "Creation of rogue roles or potential administrative role flooding."
+                    "desc": "Monitors creation of new server roles."
                 },
                 "roleUpdate": {
-                    "name": "Role Escalated",
-                    "desc": "Granting dangerous administrative permissions to roles."
+                    "name": "Role Updated",
+                    "desc": "Monitors privilege escalation and permission changes on existing roles."
                 },
                 "roleDelete": {
                     "name": "Role Deleted",
-                    "desc": "Destructive deletion of critical server security and staff roles."
+                    "desc": "Monitors deletion of existing server roles."
                 },
                 "guildMemberUpdate": {
-                    "name": "Member Escalated / Timed Out",
-                    "desc": "Unauthorized assignment of high-privilege roles or malicious timeouts."
+                    "name": "Member Updated",
+                    "desc": "Monitors assignment of dangerous roles and unauthorized timeouts."
                 },
                 "guildMemberRemove": {
-                    "name": "Member Kicked",
-                    "desc": "Mass kicking or unauthorized removal of server members."
+                    "name": "Member Removed (Kick)",
+                    "desc": "Monitors mass kicks and forced removals of members."
                 },
                 "guildBanAdd": {
                     "name": "Member Banned",
-                    "desc": "Mass banning or unauthorized permanent exclusion of members."
+                    "desc": "Monitors bans issued across server members."
                 },
                 "guildBanRemove": {
                     "name": "Member Unbanned",
-                    "desc": "Unauthorized unbanning of previously banned malicious accounts."
+                    "desc": "Monitors unauthorized unbans of previously restricted users."
                 },
                 "guildEmojisUpdate": {
-                    "name": "Server Emojis Modified",
-                    "desc": "Mass deletion or unauthorized modifications of server emojis."
+                    "name": "Server Emojis Updated",
+                    "desc": "Monitors mass addition or deletion of server custom emojis."
                 },
                 "guildStickersUpdate": {
-                    "name": "Server Stickers Modified",
-                    "desc": "Mass deletion or unauthorized changes to server stickers."
+                    "name": "Server Stickers Updated",
+                    "desc": "Monitors mass addition or deletion of server stickers."
                 },
                 "webhooksUpdate": {
-                    "name": "Webhooks Modified",
-                    "desc": "Creation, alteration, or deletion of rogue webhooks."
+                    "name": "Webhooks Updated",
+                    "desc": "Monitors creation, modification, and deletion of channel webhooks."
                 },
                 "inviteCreate": {
                     "name": "Invite Created",
-                    "desc": "Rogue vanity or unlimited invite creation during raid events."
+                    "desc": "Monitors unauthorized generation of server invite links."
                 },
                 "inviteDelete": {
                     "name": "Invite Deleted",
-                    "desc": "Mass deletion of verified vanity or staff invite links."
+                    "desc": "Monitors mass revocation of active server invites."
                 },
                 "guildIntegrationsUpdate": {
-                    "name": "Integrations Modified",
-                    "desc": "Unauthorized manipulation of third-party bot integrations."
+                    "name": "Integrations Updated",
+                    "desc": "Monitors creation or deletion of third-party server integrations."
                 },
                 "autoModerationRuleCreate": {
                     "name": "AutoMod Rule Created",
-                    "desc": "Creation of conflicting or malicious AutoMod filtering rules."
+                    "desc": "Monitors creation of native Discord AutoMod filter rules."
                 },
                 "autoModerationRuleUpdate": {
-                    "name": "AutoMod Rule Modified",
-                    "desc": "Disabling or altering AutoMod security and keyword rules."
+                    "name": "AutoMod Rule Updated",
+                    "desc": "Monitors modification or disabling of AutoMod filter rules."
                 },
                 "autoModerationRuleDelete": {
                     "name": "AutoMod Rule Deleted",
-                    "desc": "Destructive deletion of active AutoMod protection rules."
+                    "desc": "Monitors deletion of AutoMod security filters."
                 },
                 "guildAuditLogEntryCreate": {
-                    "name": "Audit Log Anomaly",
-                    "desc": "High-frequency audit log modifications or anomalous administrative actions."
+                    "name": "Audit Log Entry Created",
+                    "desc": "Monitors high-frequency administrative operations in real-time."
                 },
                 "guildScheduledEventDelete": {
                     "name": "Scheduled Event Deleted",
-                    "desc": "Unauthorized cancellation of server events and community stages."
+                    "desc": "Monitors cancellation or deletion of scheduled server events."
                 },
                 "threadDelete": {
                     "name": "Thread Deleted",
-                    "desc": "Mass deletion of discussion and forum threads."
+                    "desc": "Monitors deletion of active or archived forum/text threads."
                 },
                 "bot_add": {
-                    "name": "Rogue Bot Added",
-                    "desc": "Adding unverified or unapproved bot accounts to the server."
+                    "name": "Unauthorized Bot Added",
+                    "desc": "Monitors unauthorized invitation of automated bot accounts."
                 }
             },
-            "wizard_step1_title": "{emoji:shield} Setup Step 1/6: Pre-Flight Security Audit",
-            "wizard_step2_title": "{emoji:gear} Setup Step 2/6: Defensive Operating Mode",
-            "wizard_step3_title": "{emoji:tools} Setup Step 3/6: Event Monitoring Scope",
-            "wizard_step4_title": "{emoji:danger} Setup Step 4/6: Punishments & Thresholds",
-            "wizard_step5_title": "{emoji:channel} Setup Step 5/6: Alert & Log Channels",
-            "wizard_step6_title": "{emoji:check} Setup Step 6/6: Review & Final Activation",
+            "wizard_step1_title": "Setup Step 1/6: Pre-Flight Security Audit",
+            "wizard_step2_title": "Setup Step 2/6: Defensive Operating Mode",
+            "wizard_step3_title": "Setup Step 3/6: Event Monitoring Scope",
+            "wizard_step4_title": "Setup Step 4/6: Threshold Calibration",
+            "wizard_step5_title": "Setup Step 5/6: Alert & Forensics Channels",
+            "wizard_step6_title": "Setup Step 6/6: Review & Final Activation",
             "wizard_step2_desc": "Choose the defensive posture for {guild_name}:\n\n• **Ultimate Defence Wall (`ultimate`):** Configurable sliding burst thresholds with automated quarantine. Recommended for active communities.\n• **Hard Zero-Tolerance (`hard`):** 1 unauthorized action triggers immediate permanent ban.\n• **Hybrid Dynamic Defense (`hybrid`):** Zero-tolerance instant bans on bot additions & permission escalation, sliding-window burst defense on channels/roles.",
             "wizard_step3_desc": "Select which gateway events to monitor in real-time. By default, all 23 high and critical risk events are actively guarded against unauthorized actions.",
             "wizard_step4_desc": "Review default disciplinary responses:\n• Critical events (bans, kicks, role deletes, bot additions): **BAN**\n• High events (channels, roles, webhooks): **QUARANTINE**\n• Rate-limit breaches: **TIMEOUT**",
@@ -349,14 +348,28 @@
             "wizard_completed_desc": "{emoji:check} Anti-Nuke defense has been initialized and activated for **{guild_name}**.\n\n• **Operating Mode:** `{mode_name}`\n• **Monitored Events:** `{events_count}` active events\n• **Warning Channel:** {warning_channel}\n• **Log Channel:** {log_channel}\n\nAll security systems are now actively observing gateway events.",
             "wizard_incomplete_warning": "{emoji:warning} Setup Incomplete: You must complete the setup process before anti-nuke defense can be activated.",
             "wizard_cancelled": "{emoji:info} Anti-Nuke Setup Wizard cancelled. Existing configuration was preserved.",
-            "wizard_wl_title": "{emoji:shield} Anti-Nuke Whitelist Manager",
+            "wizard_wl_title": "Anti-Nuke Whitelist Manager",
             "wizard_wl_pick_type": "Select the entity type you wish to whitelist:\n\n• **User:** Exempts an individual user or verified bot account.\n• **Role:** Exempts all members holding a specified server role.\n• **Channel:** Exempts actions occurring inside a specific text/voice channel.\n• **Category:** Exempts channel actions within an entire category.",
             "wizard_wl_select_events": "Select which events this entity is permitted to perform without triggering anti-nuke sanctions. You can choose specific events or all events.",
             "wizard_wl_saved": "{emoji:check} Whitelist exemption saved for {target_type} **{target_name}** (`{target_id}`).\n**Exempt Events:** `{events}`",
             "wizard_wl_removed": "{emoji:check} Whitelist exemption removed for {target_type} `{target_id}`.",
             "punishment_title": "{emoji:danger} Anti-Nuke Disciplinary Responses",
             "punishment_overview": "Configure automated punishments when an unwhitelisted entity exceeds authorized thresholds.\n\n• **Current Operating Mode:** `{mode_name}`\n• **Active Punishments Configured:** `{count}` events",
-            "punishment_invalid": "{emoji:cross} Invalid punishment. Allowed actions: `ban`, `kick`, `quarantine`, `timeout`."
+            "punishment_invalid": "{emoji:cross} Invalid punishment. Allowed actions: `ban`, `kick`, `quarantine`, `timeout`.",
+            "modes": {
+                "hard": "Hard (Zero-Tolerance)",
+                "ultimate": "Ultimate Defence Wall (Disabled)",
+                "hybrid": "Hybrid Defense (Disabled)"
+            },
+            "mode_disabled_notice": "{emoji:warning} The mode `{mode}` is currently disabled by system feature flags. Only enabled security modes can be activated.",
+            "punishments": {
+                "ban": "Permanently bans the offending member from the server. Requires Ban Members permission and bot role hierarchy.",
+                "kick": "Kicks the offending member from the server. Requires Kick Members permission and bot role hierarchy.",
+                "timeout": "Applies an administrative timeout/mute to the offending member. Requires Moderate Members permission.",
+                "prune": "Kicks unauthorized or compromised accounts from the server.",
+                "strip_roles": "Immediately removes all dangerous administrative roles from the offending member within bot role hierarchy limits.",
+                "quarantine": "Reserved for a future role-based containment system; currently unavailable."
+            }
         }
     },
     "system": {
@@ -864,142 +877,6 @@
                 "punish",
                 "action"
             ]
-        }
-    },
-    "security": {
-        "antinuke": {
-            "title": "{emoji:shield} Anti-Nuke Control Center",
-            "setup_required": {
-                "title": "{emoji:shield} Anti-Nuke Setup Required",
-                "description": "{emoji:warning} Anti-Nuke protection has not been initialized for this server.\n\nTo prevent misconfiguration and accidental lockouts, all anti-nuke controls, whitelists, and real-time monitoring are locked until the interactive Setup Wizard is completed.\n\nUse `$setup` or `$antinuke setup` to begin the guided security configuration."
-            },
-            "modes": {
-                "hard": "Hard (Zero-Tolerance)",
-                "ultimate": "Ultimate Defence Wall (Disabled)",
-                "hybrid": "Hybrid Defense (Disabled)"
-            },
-            "mode_descriptions": {
-                "hard": "Strict protection against suspicious destructive server changes, applying the configured thresholds and punishments.",
-                "ultimate": "Reserved for a future advanced protection system; currently unavailable.",
-                "hybrid": "Reserved for a future combination of security modes; currently unavailable."
-            },
-            "mode_disabled_notice": "{emoji:warning} The mode `{mode}` is currently disabled by system feature flags. Only enabled security modes can be activated.",
-            "punishment_title": "{emoji:danger} Anti-Nuke Disciplinary Responses",
-            "punishments": {
-                "ban": "Permanently bans the offending member from the server. Requires Ban Members permission and bot role hierarchy.",
-                "kick": "Kicks the offending member from the server. Requires Kick Members permission and bot role hierarchy.",
-                "timeout": "Applies an administrative timeout/mute to the offending member. Requires Moderate Members permission.",
-                "prune": "Kicks unauthorized or compromised accounts from the server.",
-                "strip_roles": "Immediately removes all dangerous administrative roles from the offending member within bot role hierarchy limits.",
-                "quarantine": "Reserved for a future role-based containment system; currently unavailable."
-            },
-            "events": {
-                "guildUpdate": {
-                    "name": "Server Settings Updated",
-                    "desc": "Monitors changes to server name, vanity URL, verification level, or widget."
-                },
-                "channelCreate": {
-                    "name": "Channel Created",
-                    "desc": "Monitors creation of text, voice, announcement, and forum channels."
-                },
-                "channelUpdate": {
-                    "name": "Channel Updated",
-                    "desc": "Monitors modifications to channel permissions, names, topics, or overwrites."
-                },
-                "channelDelete": {
-                    "name": "Channel Deleted",
-                    "desc": "Monitors deletion of server channels and categories."
-                },
-                "roleCreate": {
-                    "name": "Role Created",
-                    "desc": "Monitors creation of new server roles."
-                },
-                "roleUpdate": {
-                    "name": "Role Updated",
-                    "desc": "Monitors privilege escalation and permission changes on existing roles."
-                },
-                "roleDelete": {
-                    "name": "Role Deleted",
-                    "desc": "Monitors deletion of existing server roles."
-                },
-                "guildMemberUpdate": {
-                    "name": "Member Updated",
-                    "desc": "Monitors assignment of dangerous roles and unauthorized timeouts."
-                },
-                "guildMemberRemove": {
-                    "name": "Member Removed (Kick)",
-                    "desc": "Monitors mass kicks and forced removals of members."
-                },
-                "guildBanAdd": {
-                    "name": "Member Banned",
-                    "desc": "Monitors bans issued across server members."
-                },
-                "guildBanRemove": {
-                    "name": "Member Unbanned",
-                    "desc": "Monitors unauthorized unbans of previously restricted users."
-                },
-                "guildEmojisUpdate": {
-                    "name": "Server Emojis Updated",
-                    "desc": "Monitors mass addition or deletion of server custom emojis."
-                },
-                "guildStickersUpdate": {
-                    "name": "Server Stickers Updated",
-                    "desc": "Monitors mass addition or deletion of server stickers."
-                },
-                "webhooksUpdate": {
-                    "name": "Webhooks Updated",
-                    "desc": "Monitors creation, modification, and deletion of channel webhooks."
-                },
-                "inviteCreate": {
-                    "name": "Invite Created",
-                    "desc": "Monitors unauthorized generation of server invite links."
-                },
-                "inviteDelete": {
-                    "name": "Invite Deleted",
-                    "desc": "Monitors mass revocation of active server invites."
-                },
-                "guildIntegrationsUpdate": {
-                    "name": "Integrations Updated",
-                    "desc": "Monitors creation or deletion of third-party server integrations."
-                },
-                "autoModerationRuleCreate": {
-                    "name": "AutoMod Rule Created",
-                    "desc": "Monitors creation of native Discord AutoMod filter rules."
-                },
-                "autoModerationRuleUpdate": {
-                    "name": "AutoMod Rule Updated",
-                    "desc": "Monitors modification or disabling of AutoMod filter rules."
-                },
-                "autoModerationRuleDelete": {
-                    "name": "AutoMod Rule Deleted",
-                    "desc": "Monitors deletion of AutoMod security filters."
-                },
-                "guildAuditLogEntryCreate": {
-                    "name": "Audit Log Entry Created",
-                    "desc": "Monitors high-frequency administrative operations in real-time."
-                },
-                "guildScheduledEventDelete": {
-                    "name": "Scheduled Event Deleted",
-                    "desc": "Monitors cancellation or deletion of scheduled server events."
-                },
-                "threadDelete": {
-                    "name": "Thread Deleted",
-                    "desc": "Monitors deletion of active or archived forum/text threads."
-                },
-                "bot_add": {
-                    "name": "Unauthorized Bot Added",
-                    "desc": "Monitors unauthorized invitation of automated bot accounts."
-                }
-            },
-            "wizard_step1_title": "Setup Step 1/6: Pre-Flight Security Audit",
-            "wizard_step2_title": "Setup Step 2/6: Defensive Operating Mode",
-            "wizard_step3_title": "Setup Step 3/6: Event Monitoring Scope",
-            "wizard_step4_title": "Setup Step 4/6: Threshold Calibration",
-            "wizard_step5_title": "Setup Step 5/6: Alert & Forensics Channels",
-            "wizard_step6_title": "Setup Step 6/6: Review & Final Activation",
-            "wizard_wl_title": "Anti-Nuke Whitelist Manager",
-            "alert_title_user": "Forensic Alert: Unauthorized User Operation Blocked",
-            "alert_title_bot": "Forensic Alert: Unauthorized Bot Operation Blocked"
         }
     },
     "dashboard": {

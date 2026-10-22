@@ -8,6 +8,8 @@ class CommandRegistry:
 
     def register(self, command: Command) -> bool:
         name = command.name.lower()
+        if name in self._commands and self._commands[name].execute == command.execute:
+            return False
         self._commands[name] = command
         for a in command.aliases:
             self._aliases[a.lower()] = name

@@ -9,6 +9,9 @@ class EventRegistry:
         name = event.name
         if name not in self._events:
             self._events[name] = []
+        for existing in self._events[name]:
+            if existing.execute == event.execute:
+                return False
         self._events[name].append(event)
         return True
 
