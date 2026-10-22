@@ -30,9 +30,18 @@ class AntiNukeConstants:
     # Punishments
     PUNISH_BAN = "ban"
     PUNISH_KICK = "kick"
-    PUNISH_QUARANTINE = "quarantine"
     PUNISH_TIMEOUT = "timeout"
-    VALID_PUNISHMENTS = [PUNISH_BAN, PUNISH_KICK, PUNISH_QUARANTINE, PUNISH_TIMEOUT]
+    PUNISH_PRUNE = "prune"
+    PUNISH_STRIP_ROLES = "strip_roles"
+    PUNISH_QUARANTINE = "quarantine"
+    VALID_PUNISHMENTS = [
+        PUNISH_BAN,
+        PUNISH_KICK,
+        PUNISH_TIMEOUT,
+        PUNISH_PRUNE,
+        PUNISH_STRIP_ROLES,
+        PUNISH_QUARANTINE,
+    ]
 
     # Target Types for Whitelist
     TARGET_USER = "user"
@@ -221,6 +230,18 @@ class AntiNukeConstants:
         re.compile(r"^ticket_", re.IGNORECASE),
         re.compile(r"-ticket$", re.IGNORECASE),
     ]
+
+    @classmethod
+    def get_enabled_modes(cls) -> List[str]:
+        raw = getattr(settings, "ANTINUKE_MODES_ENABLED", ["hard"]) or ["hard"]
+        enabled = [m.lower().strip() for m in raw if m.lower().strip() in cls.VALID_MODES]
+        return enabled if enabled else [cls.MODE_HARD]
+
+    @classmethod
+    def is_mode_enabled(cls, mode: str) -> bool:
+        if not mode:
+            return False
+        return mode.lower().strip() in cls.get_enabled_modes()
 
     @classmethod
     def normalize_event(cls, name_or_alias: str) -> Optional[str]:
@@ -456,21 +477,29 @@ class AntiNukeManager:
     @classmethod
     def get_mode_display_name(cls, mode: str) -> str:
         """Retrieves localized display name for the operating mode from Strings.json."""
-        default_names = {
-            AntiNukeConstants.MODE_HARD: "Hard Zero-Tolerance",
-            AntiNukeConstants.MODE_ULTIMATE: "Ultimate Defence Wall",
-            AntiNukeConstants.MODE_HYBRID: "Hybrid Dynamic Defense",
-        }
-        return get_string(f"security.antinuke.mode_names.{mode}", default_names.get(mode, mode.title()))
+        localized = get_string(f"security.antinuke.modes.{mode}")
+        if localized:
+            return localized
+        if mode == AntiNukeConstants.MODE_HARD:
+            return "Hard (Zero-Tolerance)"
+        elif mode == AntiNukeConstants.MODE_ULTIMATE:
+            return "Ultimate Defence Wall (Disabled)"
+        elif mode == AntiNukeConstants.MODE_HYBRID:
+            return "Hybrid Defense (Disabled)"
+        return mode.title()
 
     @classmethod
     def get_guild_config(cls, guild_id: str) -> Dict[str, Any]:
         """Returns the guild's Anti-Nuke configuration, initialized with defaults if not present."""
         gid = str(guild_id)
         if gid in cls._guild_configs:
-            return cls._guild_configs[gid]
+            cfg = cls._guild_configs[gid]
+            # Ensure disabled modes fall back to an enabled mode
+            if not AntiNukeConstants.is_mode_enabled(cfg.get("mode", "")):
+                cfg["mode"] = AntiNukeConstants.MODE_HARD
+            return cfg
 
-        default_mode = AntiNukeConstants.MODE_ULTIMATE
+        default_mode = AntiNukeConstants.MODE_HARD
         default_config = {
             "guild_id": gid,
             "setup_completed": False,
@@ -829,6 +858,21 @@ class AntiNukeManager:
                     return {"success": True, "punishment": "timeout"}
                 return {"success": False, "error": "Member cannot be timed out"}
 
+            elif punishment == AntiNukeConstants.PUNISH_STRIP_ROLES:
+                if target_member:
+                    me = guild.me
+                    roles_to_remove = [r for r in target_member.roles if r < me.top_role and not r.is_default()]
+                    if roles_to_remove:
+                        await target_member.remove_roles(*roles_to_remove, reason=reason)
+                    return {"success": True, "punishment": "strip_roles", "stripped_roles": [r.name for r in roles_to_remove]}
+                return {"success": False, "error": "Member not in guild to strip roles"}
+
+            elif punishment == AntiNukeConstants.PUNISH_PRUNE:
+                if target_member:
+                    await target_member.kick(reason=f"{reason} (Prune)")
+                    return {"success": True, "punishment": "prune"}
+                return {"success": False, "error": "Member not in guild to prune"}
+
             elif punishment == AntiNukeConstants.PUNISH_QUARANTINE:
                 if target_member:
                     me = guild.me
@@ -940,3 +984,57 @@ class AntiNukeManager:
                     await ch.send(view=container)
                 except Exception as ch_err:
                     logger.error(f"[AntiNuke] Failed to send alert message to channel {warning_channel_id}: {ch_err}")
+
+    @classmethod
+    def get_registered_events_diagnostics(cls) -> Dict[str, Any]:
+        """Audits all 24 monitored event vectors and provides startup/runtime diagnostics."""
+        from apps.bot.discord.events.registry import events_registry
+        registered_events = set()
+        for evt in events_registry.list_all():
+            registered_events.add(evt.name)
+
+        # Mapping of canonical event to required discord.py event handler name
+        vector_mappings = {
+            AntiNukeConstants.EVENT_GUILD_UPDATE: "on_guild_update",
+            AntiNukeConstants.EVENT_CHANNEL_CREATE: "on_guild_channel_create",
+            AntiNukeConstants.EVENT_CHANNEL_UPDATE: "on_guild_channel_update",
+            AntiNukeConstants.EVENT_CHANNEL_DELETE: "on_guild_channel_delete",
+            AntiNukeConstants.EVENT_ROLE_CREATE: "on_guild_role_create",
+            AntiNukeConstants.EVENT_ROLE_UPDATE: "on_guild_role_update",
+            AntiNukeConstants.EVENT_ROLE_DELETE: "on_guild_role_delete",
+            AntiNukeConstants.EVENT_MEMBER_UPDATE: "on_member_update",
+            AntiNukeConstants.EVENT_MEMBER_REMOVE: "on_member_remove",
+            AntiNukeConstants.EVENT_BAN_ADD: "on_member_ban",
+            AntiNukeConstants.EVENT_BAN_REMOVE: "on_member_unban",
+            AntiNukeConstants.EVENT_EMOJIS_UPDATE: "on_guild_emojis_update",
+            AntiNukeConstants.EVENT_STICKERS_UPDATE: "on_guild_stickers_update",
+            AntiNukeConstants.EVENT_WEBHOOKS_UPDATE: "on_webhooks_update",
+            AntiNukeConstants.EVENT_INVITE_CREATE: "on_invite_create",
+            AntiNukeConstants.EVENT_INVITE_DELETE: "on_invite_delete",
+            AntiNukeConstants.EVENT_INTEGRATIONS_UPDATE: "on_guild_integrations_update",
+            AntiNukeConstants.EVENT_AUTOMOD_CREATE: "on_auto_moderation_rule_create",
+            AntiNukeConstants.EVENT_AUTOMOD_UPDATE: "on_auto_moderation_rule_update",
+            AntiNukeConstants.EVENT_AUTOMOD_DELETE: "on_auto_moderation_rule_delete",
+            AntiNukeConstants.EVENT_AUDIT_LOG_CREATE: "on_audit_log_entry_create",
+            AntiNukeConstants.EVENT_SCHEDULED_EVENT_DELETE: "on_scheduled_event_delete",
+            AntiNukeConstants.EVENT_THREAD_DELETE: "on_thread_delete",
+            AntiNukeConstants.EVENT_BOT_ADD: "on_member_join",
+        }
+
+        active = []
+        missing = []
+        for canonical, handler_name in vector_mappings.items():
+            if handler_name in registered_events:
+                active.append({"canonical": canonical, "handler": handler_name, "status": "active"})
+            else:
+                missing.append({"canonical": canonical, "handler": handler_name, "status": "missing"})
+
+        return {
+            "total_monitored": len(vector_mappings),
+            "registered_count": len(active),
+            "missing_count": len(missing),
+            "active_vectors": active,
+            "missing_vectors": missing,
+            "all_registered": len(missing) == 0,
+        }
+

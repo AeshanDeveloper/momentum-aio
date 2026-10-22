@@ -151,6 +151,7 @@ class SelectMenuBuilder:
         self.disabled: bool = False
         self.menu_type: SelectMenuTypes = SelectMenuTypes.CUSTOM
         self.callback: Optional[Callable] = None
+        self.channel_types: Optional[List[Any]] = None
 
     def set_custom_id(self, custom_id: str) -> SelectMenuBuilder:
         self.custom_id = str(custom_id)[:100] if custom_id is not None else None
@@ -244,6 +245,10 @@ class SelectMenuBuilder:
         self.callback = callback
         return self
 
+    def set_channel_types(self, channel_types: List[Any]) -> SelectMenuBuilder:
+        self.channel_types = channel_types
+        return self
+
     def build(self) -> Union[discord.ui.Select, discord.ui.UserSelect, discord.ui.RoleSelect, discord.ui.ChannelSelect]:
         cid = self.custom_id or f"sel_{id(self)}"
 
@@ -264,13 +269,16 @@ class SelectMenuBuilder:
                 disabled=self.disabled,
             )
         elif self.menu_type == SelectMenuTypes.CHANNEL:
-            item = discord.ui.ChannelSelect(
-                custom_id=cid,
-                placeholder=self.placeholder,
-                min_values=self.min_values,
-                max_values=self.max_values,
-                disabled=self.disabled,
-            )
+            kwargs = {
+                "custom_id": cid,
+                "placeholder": self.placeholder,
+                "min_values": self.min_values,
+                "max_values": self.max_values,
+                "disabled": self.disabled,
+            }
+            if self.channel_types is not None:
+                kwargs["channel_types"] = self.channel_types
+            item = discord.ui.ChannelSelect(**kwargs)
         else:
             if not self.options:
                 self.add_option(label="No options", value="none")
