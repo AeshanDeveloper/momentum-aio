@@ -150,40 +150,48 @@ async def build_wizard_step2_view(guild: discord.Guild) -> Any:
     sess = get_or_create_wizard_session(guild)
     sess["step"] = 2
     sess["completed_steps"].add(2)
-    current_mode = sess.get("mode", AntiNukeConstants.MODE_ULTIMATE)
+    enabled_modes = AntiNukeConstants.get_enabled_modes()
+    current_mode = sess.get("mode", AntiNukeConstants.MODE_HARD)
+    if current_mode not in enabled_modes:
+        current_mode = AntiNukeConstants.MODE_HARD
+        sess["mode"] = current_mode
+
+    hard_desc = get_string("security.antinuke.mode_descriptions.hard", "Strict protection against suspicious destructive server changes, applying the configured thresholds and punishments.")
+    ultimate_desc = get_string("security.antinuke.mode_descriptions.ultimate", "Reserved for a future advanced protection system; currently unavailable.")
+    hybrid_desc = get_string("security.antinuke.mode_descriptions.hybrid", "Reserved for a future combination of security modes; currently unavailable.")
 
     desc = (
         f"Select the defensive posture for **{guild.name}**:\n\n"
-        f"• **Ultimate Defence Wall (`ultimate`):** {EMOJIS.get('shield', '🛡️')} Configurable sliding burst thresholds "
-        f"with automated role quarantine. High-resilience defense without disrupting everyday staff tasks. *(Recommended)*\n\n"
-        f"• **Hard Zero-Tolerance (`hard`):** {EMOJIS.get('danger', '⚡')} 1 unauthorized action triggers immediate permanent ban. "
-        f"Best for zero-compromise lockdown environments.\n\n"
-        f"• **Hybrid Dynamic Defense (`hybrid`):** {EMOJIS.get('sparkles', '✨')} Instant bans on rogue bot adds & permission grants, "
-        f"sliding burst thresholds on channels and roles."
+        f"• **Hard Zero-Tolerance (`hard`):** {EMOJIS.get('danger', '⚡')} {hard_desc} *(Active Mode)*\n\n"
+        f"• **Ultimate Defence Wall (`ultimate`):** {EMOJIS.get('lock', '🔒')} {ultimate_desc}\n\n"
+        f"• **Hybrid Dynamic Defense (`hybrid`):** {EMOJIS.get('lock', '🔒')} {hybrid_desc}\n\n"
+        f"-# *Notice: Only enabled modes may be activated. Hard mode operates within Discord's native hierarchy.*"
     )
 
     action_row_1 = (
         ActionRowBuilder()
         .add_button(
             ButtonBuilder()
-            .set_custom_id(f"an_wiz:set_mode:ultimate:{guild.id}")
-            .set_label("Ultimate Defence Wall" + (" (Selected)" if current_mode == "ultimate" else ""))
-            .set_style(ButtonStyle.Success if current_mode == "ultimate" else ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("shield", "🛡️"))
-        )
-        .add_button(
-            ButtonBuilder()
             .set_custom_id(f"an_wiz:set_mode:hard:{guild.id}")
-            .set_label("Hard Zero-Tolerance" + (" (Selected)" if current_mode == "hard" else ""))
+            .set_label("Hard Zero-Tolerance" + (" (Active)" if current_mode == "hard" else ""))
             .set_style(ButtonStyle.Success if current_mode == "hard" else ButtonStyle.Secondary)
             .set_emoji(EMOJIS.get("danger", "⚡"))
         )
         .add_button(
             ButtonBuilder()
+            .set_custom_id(f"an_wiz:set_mode:ultimate:{guild.id}")
+            .set_label("Ultimate Wall (Disabled)")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("lock", "🔒"))
+            .set_disabled(True)
+        )
+        .add_button(
+            ButtonBuilder()
             .set_custom_id(f"an_wiz:set_mode:hybrid:{guild.id}")
-            .set_label("Hybrid Defense" + (" (Selected)" if current_mode == "hybrid" else ""))
-            .set_style(ButtonStyle.Success if current_mode == "hybrid" else ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("sparkles", "✨"))
+            .set_label("Hybrid (Disabled)")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("lock", "🔒"))
+            .set_disabled(True)
         )
     )
 

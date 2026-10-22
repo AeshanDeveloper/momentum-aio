@@ -274,6 +274,17 @@ class BotManager:
             # Also discover additional external plugins in plugins folder
             await self.plugins.discover_and_load()
             await self.plugins.enable_all()
+
+            # Startup Diagnostics
+            reg_events = events_registry.list_all()
+            reg_cmds = commands_registry.list_all()
+            from core.security.antinuke import AntiNukeConstants
+            antinuke_events = [e for e in reg_events if getattr(e, "canonical_event", None) or e.name.startswith("on_")]
+            logger.info(
+                f"[BotManager] Startup Diagnostics: {len(reg_cmds)} commands registered | "
+                f"{len(reg_events)} total event listeners registered ({len(antinuke_events)} security listeners). "
+                f"Enabled security modes: {AntiNukeConstants.get_enabled_modes()}"
+            )
             return {"ready": True}
         except Exception as err:
             logger.error(f"[BotManager] Setup failure: {err}")

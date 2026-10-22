@@ -3,12 +3,12 @@ import os
 import sys
 import unittest
 from unittest.mock import MagicMock, AsyncMock
-import discord
-
 # Add python directory to sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+
+import discord
 
 from config.settings import settings, COLORS, EMOJIS
 from core.security.antinuke import AntiNukeManager, AntiNukeConstants, get_default_thresholds, get_default_punishments

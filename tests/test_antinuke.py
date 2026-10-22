@@ -10,7 +10,15 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "python
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-import pytest
+try:
+    import pytest
+except ImportError:
+    class MockPytest:
+        class mark:
+            @staticmethod
+            def asyncio(f):
+                return f
+    pytest = MockPytest()
 from core.security.antinuke import (
     AntiNukeManager,
     AntiNukeConstants,

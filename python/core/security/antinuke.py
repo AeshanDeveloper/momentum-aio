@@ -3,7 +3,10 @@ import asyncio
 import re
 import collections
 from typing import Dict, Any, List, Optional, Set, Tuple
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import discord
 
 from config.settings import settings, COLORS, EMOJIS
@@ -61,6 +64,7 @@ class AntiNukeConstants:
     EVENT_MEMBER_UPDATE = "guildMemberUpdate"
     EVENT_MEMBER_REMOVE = "guildMemberRemove"
     EVENT_BAN_ADD = "guildBanAdd"
+    EVENT_BAN = EVENT_BAN_ADD
     EVENT_BAN_REMOVE = "guildBanRemove"
     EVENT_EMOJIS_UPDATE = "guildEmojisUpdate"
     EVENT_STICKERS_UPDATE = "guildStickersUpdate"
@@ -578,7 +582,7 @@ class AntiNukeManager:
                     return True
             return False
 
-        executor_id = str(executor.id)
+        executor_id = str(executor.id) if hasattr(executor, "id") else str(executor)
 
         # 1. User check
         if executor_id in whitelists:
@@ -690,7 +694,7 @@ class AntiNukeManager:
             if target.top_role >= me.top_role:
                 return {
                     "can_act": False,
-                    "reason": f"Target's highest role ({target.top_role.name}) is higher than or equal to bot's role ({me.top_role.name})."
+                    "reason": f"Target's highest role ({target.top_role.name}) is higher than or equal to {settings.BOT_NAME}'s role ({me.top_role.name})."
                 }
 
         return {"can_act": True, "reason": "Bot has adequate hierarchy and permissions."}
@@ -711,8 +715,6 @@ class AntiNukeManager:
 
         cfg = cls.get_guild_config(str(guild.id))
 
-        if not cfg.get("setup_completed", False):
-            return {"action_taken": None, "reason": "Anti-Nuke setup is not completed"}
         if not cfg.get("enabled", False):
             return {"action_taken": None, "reason": "Anti-Nuke is disabled for this server"}
 

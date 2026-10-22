@@ -20,6 +20,7 @@ from .commands.security import (
     whitelist,
     unwhitelist,
     punishment,
+    thresholds,
 )
 from .commands.tickets import ticket
 from .commands.dev import (
@@ -39,6 +40,7 @@ from .commands.dev import (
 
 # Import events
 from .events import prefix_handler, slash_handler, component_handler
+from .events.antinuke import ALL_ANTINUKE_EVENT_MODULES
 
 class Plugin(BasePlugin):
     """
@@ -70,6 +72,7 @@ class Plugin(BasePlugin):
             whitelist,
             unwhitelist,
             punishment,
+            thresholds,
             ticket,
             blacklist,
             unblacklist,
@@ -118,7 +121,20 @@ class Plugin(BasePlugin):
             )
             events_registry.register(evt)
 
-        logger.info(f"[{self.plugin_id}] Successfully registered {len(command_modules)} commands & {len(event_modules)} event listeners.")
+        # Register every one of the 24 Anti-Nuke event vector listeners
+        for an_ev in ALL_ANTINUKE_EVENT_MODULES:
+            evt = Event(
+                name=getattr(an_ev, "name"),
+                execute=getattr(an_ev, "execute"),
+                description=getattr(an_ev, "description", "")
+            )
+            events_registry.register(evt)
+
+        logger.info(
+            f"[{self.plugin_id}] Startup diagnostics: {len(command_modules)} commands registered. "
+            f"{len(events_registry.list_all())} total event listeners active "
+            f"({len(ALL_ANTINUKE_EVENT_MODULES)}/24 Anti-Nuke gateway vectors successfully registered)."
+        )
 
     async def on_ready(self) -> None:
         pass
