@@ -12,6 +12,7 @@ dist/
 .env
 .env.local
 */venv
+venv
 */venv.
 */__pycache__
 
