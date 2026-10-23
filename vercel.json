@@ -1,6 +1,0 @@
-{
-  "buildCommand": "pnpm run build",
-  "outputDirectory": "dist",
-  "framework": null,
-  "cleanUrls": true
-}

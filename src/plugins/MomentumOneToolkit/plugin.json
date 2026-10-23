@@ -1,9 +1,0 @@
-{
-	"name": "Momentum Toolkit",
-	"description": "A preinstalled toolkit from MomentumOne.",
-	"version": "1.0.0",
-	"author": "MomentunOne",
-	"main": "index.js",
-	"minimumMomentumOneVersion": ">=26.1.0",
-	"license": "MIT"
-}

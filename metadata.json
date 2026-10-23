@@ -1,7 +1,0 @@
-{
-  "name": "MomentumOne Control Center",
-  "description": "Enterprise-grade modular Discord platform and control center.",
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
-}
