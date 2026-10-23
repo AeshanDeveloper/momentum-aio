@@ -80,6 +80,10 @@ async def build_threshold_overview_view(guild: discord.Guild, selected_event: Op
         cur_count = saved.get("count", 1)
         cur_window = saved.get("window", 60)
 
+    # Validate bounds
+    cur_count = max(1, min(50, int(cur_count)))
+    cur_window = max(0, min(300, int(cur_window)))
+
     friendly_active_name = AntiNukeConstants.get_event_display_name(canonical_active)
     active_desc = AntiNukeConstants.get_event_description(canonical_active)
 
@@ -96,7 +100,11 @@ async def build_threshold_overview_view(guild: discord.Guild, selected_event: Op
     )
 
     # 1. Event Selection String Select Menu
-    event_select = SelectMenuBuilder().set_custom_id(f"an_th:pick_event:{guild.id}").set_placeholder("Select an event vector to adjust threshold...")
+    event_select = (
+        SelectMenuBuilder()
+        .set_custom_id(f"an_th:pick_event:{guild.id}")
+        .set_placeholder("Select an event vector to adjust threshold...")
+    )
     for ev in AntiNukeConstants.ALL_EVENTS:
         ev_friendly = AntiNukeConstants.get_event_display_name(ev)
         ev_th = current_thresholds.get(ev, {"count": 1, "window": 60})
@@ -173,7 +181,7 @@ async def build_threshold_overview_view(guild: discord.Guild, selected_event: Op
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_text_display(desc)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_action_row(event_select)
+        .add_action_row(ActionRowBuilder().add_select_menu(event_select))
         .add_text_display("**1. Select Action Count Limit:**")
         .add_action_row(count_row)
         .add_text_display("**2. Select Sliding Time Window:**")
@@ -183,6 +191,10 @@ async def build_threshold_overview_view(guild: discord.Guild, selected_event: Op
         .add_text_display(f"-# {settings.BOT_NAME} Security Infrastructure • Sliding Burst Evaluation")
         .build()
     )
+
+
+# Export alias so component_handler can import either name safely
+build_thresholds_dashboard_view = build_threshold_overview_view
 
 
 async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):

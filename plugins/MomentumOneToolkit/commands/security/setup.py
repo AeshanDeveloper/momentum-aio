@@ -1,5 +1,5 @@
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 import discord
 
 from config.settings import settings, COLORS, EMOJIS
@@ -10,6 +10,7 @@ from sdk.discord.builders import (
     ActionRowBuilder,
     ButtonBuilder,
     SelectMenuBuilder,
+    SelectMenuTypes,
     SeparatorSpacingSize,
     ButtonStyle,
 )
@@ -35,26 +36,49 @@ def get_or_create_wizard_session(guild: discord.Guild) -> Dict[str, Any]:
     gid = str(guild.id)
     if gid not in _WIZARD_SESSIONS:
         cfg = AntiNukeManager.get_guild_config(gid)
+        enabled_modes = AntiNukeConstants.get_enabled_modes()
+        cur_mode = cfg.get("mode", AntiNukeConstants.MODE_HARD)
+        if cur_mode not in enabled_modes:
+            cur_mode = enabled_modes[0] if enabled_modes else AntiNukeConstants.MODE_HARD
+
         _WIZARD_SESSIONS[gid] = {
             "guild_id": gid,
-            "mode": cfg.get("mode", AntiNukeConstants.MODE_ULTIMATE),
+            "mode": cur_mode,
+            "mode_confirmed": False,
             "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)),
+            "events_confirmed": False,
+            "thresholds": dict(cfg.get("thresholds") or get_default_thresholds(cur_mode)),
+            "threshold_active_event": AntiNukeConstants.EVENT_CHANNEL_DELETE,
+            "thresholds_confirmed": False,
+            "punishments": dict(cfg.get("punishments") or get_default_punishments(cur_mode)),
+            "punish_active_event": AntiNukeConstants.EVENT_CHANNEL_DELETE,
+            "punishments_confirmed": False,
             "warning_channel_id": cfg.get("warning_channel_id"),
+            "warning_ch_confirmed": False,
             "log_channel_id": cfg.get("log_channel_id"),
+            "log_ch_confirmed": False,
+            "ticket_bots": list(cfg.get("ticket_bots", [])),
+            "extra_owners": list(cfg.get("extra_owners", [])),
+            "whitelists": dict(cfg.get("whitelists", {})),
             "step": 1,
-            "completed_steps": set(),
+            "completed_steps": {1},
         }
     return _WIZARD_SESSIONS[gid]
 
 
+TOTAL_STEPS = 11
+
+
+# ==============================================================================
+# Step 1: Pre-Flight Security Audit & Hierarchy Validation
+# ==============================================================================
 async def build_wizard_step1_view(guild: discord.Guild) -> Any:
-    """Step 1: Pre-Flight Security Audit & Hierarchy Validation."""
+    """Step 1/11: Pre-Flight Security Audit & Hierarchy Validation."""
     me = guild.me
     sess = get_or_create_wizard_session(guild)
     sess["step"] = 1
     sess["completed_steps"].add(1)
 
-    # 1. Audit Role Hierarchy
     higher_roles = [r for r in guild.roles if r.position >= me.top_role.position and not r.is_default() and r != me.top_role]
     hierarchy_is_safe = (len(higher_roles) == 0)
 
@@ -68,7 +92,6 @@ async def build_wizard_step1_view(guild: discord.Guild) -> Any:
             f"-# *The bot cannot restrict or strip roles from members in higher roles.*"
         )
 
-    # 2. Audit Bot Permissions
     missing_bot_perms = []
     if not me.guild_permissions.administrator:
         reqs = [
@@ -87,7 +110,6 @@ async def build_wizard_step1_view(guild: discord.Guild) -> Any:
     else:
         bot_perms_note = f"{EMOJIS.get('cross', '❌')} **Missing Bot Permissions**: `{', '.join(missing_bot_perms)}`."
 
-    # 3. Native Dangerous Roles Audit
     dangerous_roles = []
     for r in guild.roles:
         if r.is_default() or r.managed:
@@ -101,17 +123,14 @@ async def build_wizard_step1_view(guild: discord.Guild) -> Any:
 
     d_count = len(dangerous_roles)
     if d_count > 0:
-        d_summary = f"{EMOJIS.get('danger', '⚠️')} **{d_count} role(s)** hold dangerous native Discord permissions (Administrator, Manage Channels, etc.)."
+        d_summary = f"{EMOJIS.get('danger', '⚠️')} **{d_count} unmanaged role(s)** hold dangerous native Discord permissions (Administrator, Manage Channels, etc.)."
     else:
         d_summary = f"{EMOJIS.get('check', '✅')} No unmanaged roles hold dangerous native permissions."
 
-    # Risk Explanation
     risk_info = (
-        f"**Security Architecture Risk Notice:**\n"
-        f"• **Administrator:** Completely bypasses permission overwrites and channel locks.\n"
-        f"• **Manage Roles / Channels:** Allows rogue actors to delete channels or create elevated roles.\n"
-        f"• **Recommendation:** Virtualize moderation tasks through bot commands (`$channel`, `$announce`) "
-        f"instead of granting raw Discord administrative permissions."
+        f"**Security Architecture Notice:**\n"
+        f"• Anti-Nuke operates natively through Discord gateway listeners and real-time audit log evaluation.\n"
+        f"• The following 10 steps will guide you through each defense setting."
     )
 
     action_row = (
@@ -119,8 +138,713 @@ async def build_wizard_step1_view(guild: discord.Guild) -> Any:
         .add_button(
             ButtonBuilder()
             .set_custom_id(f"an_wiz:step2:{guild.id}")
-            .set_label("Next: Operating Mode")
+            .set_label("Continue: Operating Mode")
             .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:cancel:{guild.id}")
+            .set_label("Cancel Setup")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("warning", "#F59E0B"))
+        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} Setup Step 1/{TOTAL_STEPS}: Pre-Flight Security Audit")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(f"{hierarchy_note}\n\n{bot_perms_note}\n\n{d_summary}\n\n{risk_info}")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 1 of {TOTAL_STEPS}")
+        .add_action_row(action_row)
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 2: Defensive Operating Mode Selection
+# ==============================================================================
+async def build_wizard_step2_view(guild: discord.Guild) -> Any:
+    """Step 2/11: Operating Mode Selection (String Select Menu with enabled modes)."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 2
+    enabled_modes = AntiNukeConstants.get_enabled_modes()
+    current_mode = sess.get("mode", AntiNukeConstants.MODE_HARD)
+    if current_mode not in enabled_modes:
+        current_mode = enabled_modes[0] if enabled_modes else AntiNukeConstants.MODE_HARD
+        sess["mode"] = current_mode
+
+    mode_select = (
+        SelectMenuBuilder()
+        .set_custom_id(f"an_wiz:select_mode:{guild.id}")
+        .set_placeholder("Select defensive operating mode...")
+    )
+    for m in enabled_modes:
+        name = AntiNukeManager.get_mode_display_name(m)
+        desc = get_string(f"security.antinuke.mode_descriptions.{m}", "Strict protection against destructive changes.")
+        mode_select.add_option(
+            label=name[:100],
+            value=m,
+            description=desc[:100],
+            default=(m == current_mode),
+        )
+
+    mode_status = f"**Current Selection:** `{AntiNukeManager.get_mode_display_name(current_mode)}`"
+    if sess.get("mode_confirmed"):
+        mode_status += f" {EMOJIS.get('check', '✅')} *(User Confirmed)*"
+    else:
+        mode_status += " *(Click menu option or Continue to confirm)*"
+
+    desc = (
+        f"Choose the core defense posture for **{guild.name}**:\n\n"
+        f"• **Hard Zero-Tolerance (`hard`):** Strict real-time sanctions against unauthorized structural alterations.\n\n"
+        f"{mode_status}"
+    )
+
+    action_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step1:{guild.id}")
+            .set_label("Back")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step3:{guild.id}")
+            .set_label("Continue: Monitored Events")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:cancel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('gear', '⚙️')} Setup Step 2/{TOTAL_STEPS}: Defensive Operating Mode")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(mode_select))
+        .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 2 of {TOTAL_STEPS}")
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 3: Event Monitoring Scope Selection (Multi-Select String Select Menu)
+# ==============================================================================
+async def build_wizard_step3_view(guild: discord.Guild) -> Any:
+    """Step 3/11: Event Monitoring Scope Selection (All 24 events from registry)."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 3
+    monitored = set(sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS))
+
+    # Build String Select Menu for events
+    event_select = (
+        SelectMenuBuilder()
+        .set_custom_id(f"an_wiz:select_events:{guild.id}")
+        .set_placeholder("Select monitored events (multi-selection supported)...")
+        .set_min_values(1)
+        .set_max_values(min(24, len(AntiNukeConstants.ALL_EVENTS)))
+    )
+
+    # 24 Canonical events
+    for ev in AntiNukeConstants.ALL_EVENTS:
+        name = AntiNukeConstants.get_event_display_name(ev)
+        desc = AntiNukeConstants.get_event_description(ev)
+        event_select.add_option(
+            label=name[:100],
+            value=ev,
+            description=desc[:100],
+            default=(ev in monitored),
+        )
+
+    is_all = (len(monitored) >= len(AntiNukeConstants.ALL_EVENTS))
+    confirmed_badge = f"{EMOJIS.get('check', '✅')} *(Confirmed)*" if sess.get("events_confirmed") else "*(Unconfirmed Draft)*"
+
+    desc = (
+        f"Select the gateway events to monitor in real-time. Use the select menu to choose multiple events, "
+        f"or click **Monitor All 24 Events**.\n\n"
+        f"• **Active Scope:** **{len(monitored)} / {len(AntiNukeConstants.ALL_EVENTS)} events** {confirmed_badge}\n"
+        f"• **Status:** Disabled events will not trigger rate-limiting or punishments."
+    )
+
+    action_row_quick = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:events_all:{guild.id}")
+            .set_label("Monitor All 24 Events (Recommended)")
+            .set_style(ButtonStyle.Success if is_all else ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("check", "✅"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:events_confirm:{guild.id}")
+            .set_label("Confirm Current Events")
+            .set_style(ButtonStyle.Success)
+            .set_emoji(EMOJIS.get("check", "✅"))
+        )
+    )
+
+    action_row_nav = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step2:{guild.id}")
+            .set_label("Back")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step4:{guild.id}")
+            .set_label("Continue: Thresholds")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:cancel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('tools', '🔧')} Setup Step 3/{TOTAL_STEPS}: Monitored Events Scope")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(event_select))
+        .add_action_row(action_row_quick)
+        .add_action_row(action_row_nav)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 3 of {TOTAL_STEPS}")
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 4: Thresholds Configuration
+# ==============================================================================
+async def build_wizard_step4_view(guild: discord.Guild) -> Any:
+    """Step 4/11: Thresholds Configuration for Enabled Events."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 4
+    active_ev = sess.get("threshold_active_event", AntiNukeConstants.EVENT_CHANNEL_DELETE)
+    thresholds = sess.get("thresholds", {})
+    cur_th = thresholds.get(active_ev, {"count": 1, "window": 60})
+    cur_cnt = cur_th.get("count", 1)
+    cur_win = cur_th.get("window", 60)
+
+    friendly_name = AntiNukeConstants.get_event_display_name(active_ev)
+    win_str = "Lifetime" if cur_win == 0 else f"{cur_win}s"
+
+    # Event Picker String Select Menu
+    ev_select = (
+        SelectMenuBuilder()
+        .set_custom_id(f"an_wiz:th_pick_event:{guild.id}")
+        .set_placeholder("Select event to adjust threshold...")
+    )
+    monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    for ev in monitored[:25]:
+        name = AntiNukeConstants.get_event_display_name(ev)
+        th = thresholds.get(ev, {"count": 1, "window": 60})
+        ev_select.add_option(
+            label=name[:100],
+            value=ev,
+            description=f"Limit: {th.get('count', 1)} action(s) / {th.get('window', 60)}s"[:100],
+            default=(ev == active_ev),
+        )
+
+    # Action count quick-buttons
+    count_row = ActionRowBuilder()
+    for c_val in [1, 2, 3, 5]:
+        is_cur = (cur_cnt == c_val)
+        count_row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:th_set_count:{active_ev}:{c_val}:{guild.id}")
+            .set_label(f"{c_val} Action{'s' if c_val > 1 else ' (Instant)'}")
+            .set_style(ButtonStyle.Primary if is_cur else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("check" if is_cur else "bullet", "•"))
+        )
+
+    # Time window quick-buttons
+    window_row = ActionRowBuilder()
+    for w_val, w_label in [(10, "10s"), (30, "30s"), (60, "60s"), (0, "Lifetime")]:
+        is_cur = (cur_win == w_val)
+        window_row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:th_set_window:{active_ev}:{w_val}:{guild.id}")
+            .set_label(w_label)
+            .set_style(ButtonStyle.Primary if is_cur else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("check" if is_cur else "clock", "⏱️"))
+        )
+
+    confirmed_status = f"{EMOJIS.get('check', '✅')} *(Confirmed)*" if sess.get("thresholds_confirmed") else "*(Unconfirmed)*"
+
+    desc = (
+        f"Configure threshold limits for monitored events.\n\n"
+        f"• **Inspecting:** **{friendly_name}** (`{active_ev}`)\n"
+        f"• **Current Limit:** `{cur_cnt}` action(s) per `{win_str}` {confirmed_status}\n"
+        f"-# Adjust count and window below, or click **Confirm & Use Defaults**."
+    )
+
+    action_row_nav = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step3:{guild.id}")
+            .set_label("Back")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:th_confirm:{guild.id}")
+            .set_label("Confirm Thresholds")
+            .set_style(ButtonStyle.Success)
+            .set_emoji(EMOJIS.get("check", "✅"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step5:{guild.id}")
+            .set_label("Continue: Punishments")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:cancel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('gear', '⚙️')} Setup Step 4/{TOTAL_STEPS}: Action Thresholds")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(ev_select))
+        .add_text_display("**Action Limit Count:**")
+        .add_action_row(count_row)
+        .add_text_display("**Time Window:**")
+        .add_action_row(window_row)
+        .add_action_row(action_row_nav)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 4 of {TOTAL_STEPS}")
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 5: Punishments Configuration
+# ==============================================================================
+async def build_wizard_step5_view(guild: discord.Guild) -> Any:
+    """Step 5/11: Punishment Selection for Enabled Events."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 5
+    active_ev = sess.get("punish_active_event", AntiNukeConstants.EVENT_CHANNEL_DELETE)
+    punishments = sess.get("punishments", {})
+    cur_punish = punishments.get(active_ev, AntiNukeConstants.PUNISH_BAN)
+    friendly_name = AntiNukeConstants.get_event_display_name(active_ev)
+
+    ev_select = (
+        SelectMenuBuilder()
+        .set_custom_id(f"an_wiz:pn_pick_event:{guild.id}")
+        .set_placeholder("Select event to configure disciplinary action...")
+    )
+    monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    for ev in monitored[:25]:
+        name = AntiNukeConstants.get_event_display_name(ev)
+        p = punishments.get(ev, "ban")
+        ev_select.add_option(
+            label=name[:100],
+            value=ev,
+            description=f"Action: {p.upper()}"[:100],
+            default=(ev == active_ev),
+        )
+
+    # Punishment buttons: Ban, Kick, Timeout, Prune, Strip Roles (Quarantine disabled)
+    btn_row_1 = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:pn_set:{active_ev}:ban:{guild.id}")
+            .set_label("Ban" + (" (Active)" if cur_punish == "ban" else ""))
+            .set_style(ButtonStyle.Danger if cur_punish == "ban" else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("ban", "🚫"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:pn_set:{active_ev}:kick:{guild.id}")
+            .set_label("Kick" + (" (Active)" if cur_punish == "kick" else ""))
+            .set_style(ButtonStyle.Primary if cur_punish == "kick" else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("danger", "⚡"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:pn_set:{active_ev}:timeout:{guild.id}")
+            .set_label("Mute / Timeout" + (" (Active)" if cur_punish == "timeout" else ""))
+            .set_style(ButtonStyle.Primary if cur_punish == "timeout" else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("clock", "⏳"))
+        )
+    )
+
+    btn_row_2 = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:pn_set:{active_ev}:strip_roles:{guild.id}")
+            .set_label("Strip Roles" + (" (Active)" if cur_punish == "strip_roles" else ""))
+            .set_style(ButtonStyle.Primary if cur_punish == "strip_roles" else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("role", "🛡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:pn_set:{active_ev}:prune:{guild.id}")
+            .set_label("Prune" + (" (Active)" if cur_punish == "prune" else ""))
+            .set_style(ButtonStyle.Primary if cur_punish == "prune" else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("trash", "✂️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:pn_quarantine:{guild.id}")
+            .set_label("Quarantine (Unavailable)")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("lock", "🔒"))
+            .set_disabled(True)
+        )
+    )
+
+    confirmed_status = f"{EMOJIS.get('check', '✅')} *(Confirmed)*" if sess.get("punishments_confirmed") else "*(Unconfirmed)*"
+
+    desc = (
+        f"Select the disciplinary sanction for unauthorized operations:\n\n"
+        f"• **Inspecting:** **{friendly_name}** (`{active_ev}`)\n"
+        f"• **Current Action:** **`{cur_punish.upper()}`** {confirmed_status}\n"
+        f"-# Select punishment buttons below to update."
+    )
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step4:{guild.id}")
+            .set_label("Back")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:pn_confirm:{guild.id}")
+            .set_label("Confirm Punishments")
+            .set_style(ButtonStyle.Success)
+            .set_emoji(EMOJIS.get("check", "✅"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step6:{guild.id}")
+            .set_label("Continue: Warning Channel")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:cancel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('danger', '⚡')} Setup Step 5/{TOTAL_STEPS}: Disciplinary Sanctions")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(ev_select))
+        .add_action_row(btn_row_1)
+        .add_action_row(btn_row_2)
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 5 of {TOTAL_STEPS}")
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 6: Security Warning / Alert Channel (Native Channel Select Menu)
+# ==============================================================================
+async def build_wizard_step6_view(guild: discord.Guild) -> Any:
+    """Step 6/11: Security Warning Channel (Native Channel Select Menu)."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 6
+    warn_ch = sess.get("warning_channel_id")
+    warn_str = f"<#{warn_ch}> (`{warn_ch}`)" if warn_ch else "*Not Selected Yet*"
+    confirmed = bool(sess.get("warning_ch_confirmed") and warn_ch)
+    status_icon = EMOJIS.get("check", "✅") if confirmed else EMOJIS.get("warning", "⚠️")
+
+    # Native Channel Select Menu
+    ch_select = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.CHANNEL)
+        .set_custom_id(f"an_wiz:set_warning_ch:{guild.id}")
+        .set_placeholder("Select Security Warning Channel from list...")
+    )
+
+    desc = (
+        f"Select the channel where immediate real-time forensic warnings and incident alerts will be posted.\n\n"
+        f"• **Selected Warning Channel:** {status_icon} {warn_str}\n\n"
+        f"-# *Notice: Use the native channel selector below to choose the target channel.*"
+    )
+
+    nav_row = ActionRowBuilder()
+    nav_row.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:step5:{guild.id}")
+        .set_label("Back")
+        .set_style(ButtonStyle.Secondary)
+        .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+    )
+    if warn_ch:
+        nav_row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step7:{guild.id}")
+            .set_label("Continue: Log Channel")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+    else:
+        nav_row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:warn_ch_missing:{guild.id}")
+            .set_label("Select a Channel to Continue")
+            .set_style(ButtonStyle.Secondary)
+            .set_disabled(True)
+        )
+    nav_row.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:cancel:{guild.id}")
+        .set_label("Cancel")
+        .set_style(ButtonStyle.Danger)
+        .set_emoji(EMOJIS.get("cross", "❌"))
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('channel', '📢')} Setup Step 6/{TOTAL_STEPS}: Security Warning Channel")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(ch_select))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 6 of {TOTAL_STEPS}")
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 7: Incident Forensics Log Channel (Native Channel Select Menu)
+# ==============================================================================
+async def build_wizard_step7_view(guild: discord.Guild) -> Any:
+    """Step 7/11: Incident Forensics Log Channel (Native Channel Select Menu)."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 7
+    log_ch = sess.get("log_channel_id")
+    log_str = f"<#{log_ch}> (`{log_ch}`)" if log_ch else "*Not Selected Yet*"
+    confirmed = bool(sess.get("log_ch_confirmed") and log_ch)
+    status_icon = EMOJIS.get("check", "✅") if confirmed else EMOJIS.get("warning", "⚠️")
+
+    # Native Channel Select Menu
+    ch_select = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.CHANNEL)
+        .set_custom_id(f"an_wiz:set_log_ch:{guild.id}")
+        .set_placeholder("Select Forensic Audit Log Channel from list...")
+    )
+
+    desc = (
+        f"Select the channel where complete forensic audit logs, non-punitive audit records, and security telemetry are logged.\n\n"
+        f"• **Selected Log Channel:** {status_icon} {log_str}\n\n"
+        f"-# *Notice: Use the native channel selector below to choose the target channel.*"
+    )
+
+    nav_row = ActionRowBuilder()
+    nav_row.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:step6:{guild.id}")
+        .set_label("Back")
+        .set_style(ButtonStyle.Secondary)
+        .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+    )
+    if log_ch:
+        nav_row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step8:{guild.id}")
+            .set_label("Continue: Ticket Bots")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+    else:
+        nav_row.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:log_ch_missing:{guild.id}")
+            .set_label("Select a Channel to Continue")
+            .set_style(ButtonStyle.Secondary)
+            .set_disabled(True)
+        )
+    nav_row.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:cancel:{guild.id}")
+        .set_label("Cancel")
+        .set_style(ButtonStyle.Danger)
+        .set_emoji(EMOJIS.get("cross", "❌"))
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('channel', '📝')} Setup Step 7/{TOTAL_STEPS}: Forensic Log Channel")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(ch_select))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 7 of {TOTAL_STEPS}")
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 8: Trusted Ticket Bots (Native User Select Menu, with Skip)
+# ==============================================================================
+async def build_wizard_step8_view(guild: discord.Guild) -> Any:
+    """Step 8/11: Trusted Ticket Bots Exemption (Native User Select Menu)."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 8
+    tbs = sess.get("ticket_bots", [])
+
+    user_select = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.USER)
+        .set_custom_id(f"an_wiz:pick_ticket_bot:{guild.id}")
+        .set_placeholder("Select trusted ticket bot to exempt...")
+    )
+
+    tb_lines = [f"• <@{b_id}> (`{b_id}`)" for b_id in tbs]
+    tb_summary = "\n".join(tb_lines) if tb_lines else "*No ticket bots configured (Optional)*"
+
+    desc = (
+        f"Exempt ticket bot accounts from false-positive rate-limiting when they rapidly create or delete support ticket channels.\n\n"
+        f"**Currently Exempted Ticket Bots ({len(tbs)}):**\n"
+        f"{tb_summary}\n\n"
+        f"-# *This step is optional. Click Skip if no ticket bots operate in this server.*"
+    )
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step7:{guild.id}")
+            .set_label("Back")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step9:{guild.id}")
+            .set_label("Continue: Extra Owners" if tbs else "Skip: Extra Owners")
+            .set_style(ButtonStyle.Primary if tbs else ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:cancel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('ticket', '🎫')} Setup Step 8/{TOTAL_STEPS}: Ticket Bot Exemptions")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(user_select))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 8 of {TOTAL_STEPS}")
+        .build()
+    )
+
+
+# ==============================================================================
+# Step 9: Extra Owners (Native User Select Menu, with Warnings & Skip)
+# ==============================================================================
+async def build_wizard_step9_view(guild: discord.Guild) -> Any:
+    """Step 9/11: Extra Owners (Native User Select Menu)."""
+    sess = get_or_create_wizard_session(guild)
+    sess["step"] = 9
+    eos = sess.get("extra_owners", [])
+
+    user_select = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.USER)
+        .set_custom_id(f"an_wiz:pick_extra_owner:{guild.id}")
+        .set_placeholder("Select trusted administrator as Extra Owner...")
+    )
+
+    eo_lines = [f"• Root Owner: <@{guild.owner_id}> (`{guild.owner_id}`)"]
+    for uid in eos:
+        eo_lines.append(f"• Extra Owner: <@{uid}> (`{uid}`)")
+    eo_summary = "\n".join(eo_lines)
+
+    desc = (
+        f"{EMOJIS.get('warning', '⚠️')} **High-Privilege Authorization Notice:**\n"
+        f"Extra Owners bypass anti-nuke sanctions and have full authorization to modify security settings, whitelists, and thresholds.\n\n"
+        f"**Configured Security Owners:**\n"
+        f"{eo_summary}\n\n"
+        f"-# *This step is optional. Click Skip if only the Server Owner should hold security rights.*"
+    )
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step8:{guild.id}")
+            .set_label("Back")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wiz:step10:{guild.id}")
+            .set_label("Continue: Whitelists" if eos else "Skip: Whitelists")
+            .set_style(ButtonStyle.Primary if eos else ButtonStyle.Secondary)
             .set_emoji(EMOJIS.get("arrow_right", "➡️"))
         )
         .add_button(
@@ -135,79 +859,56 @@ async def build_wizard_step1_view(guild: discord.Guild) -> Any:
     return (
         ContainerBuilder()
         .set_accent_color(COLORS.get("warning", "#F59E0B"))
-        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} {get_string('security.antinuke.wizard_step1_title', 'Setup Step 1/6: Pre-Flight Security Audit')}")
+        .add_text_display(f"### {EMOJIS.get('crown', '👑')} Setup Step 9/{TOTAL_STEPS}: Security Extra Owners")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"{hierarchy_note}\n\n{bot_perms_note}\n\n{d_summary}\n\n{risk_info}")
+        .add_text_display(desc)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 1 of 6")
-        .add_action_row(action_row)
+        .add_action_row(ActionRowBuilder().add_select_menu(user_select))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 9 of {TOTAL_STEPS}")
         .build()
     )
 
 
-async def build_wizard_step2_view(guild: discord.Guild) -> Any:
-    """Step 2: Operating Mode Selection."""
+# ==============================================================================
+# Step 10: Whitelist Configuration (User Select Menu, with Skip)
+# ==============================================================================
+async def build_wizard_step10_view(guild: discord.Guild) -> Any:
+    """Step 10/11: Whitelist Exemption Configuration (Optional)."""
     sess = get_or_create_wizard_session(guild)
-    sess["step"] = 2
-    sess["completed_steps"].add(2)
-    enabled_modes = AntiNukeConstants.get_enabled_modes()
-    current_mode = sess.get("mode", AntiNukeConstants.MODE_HARD)
-    if current_mode not in enabled_modes:
-        current_mode = AntiNukeConstants.MODE_HARD
-        sess["mode"] = current_mode
+    sess["step"] = 10
+    whitelists = sess.get("whitelists", {})
 
-    hard_desc = get_string("security.antinuke.mode_descriptions.hard", "Strict protection against suspicious destructive server changes, applying the configured thresholds and punishments.")
-    ultimate_desc = get_string("security.antinuke.mode_descriptions.ultimate", "Reserved for a future advanced protection system; currently unavailable.")
-    hybrid_desc = get_string("security.antinuke.mode_descriptions.hybrid", "Reserved for a future combination of security modes; currently unavailable.")
+    user_select = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.USER)
+        .set_custom_id(f"an_wiz:pick_wl_user:{guild.id}")
+        .set_placeholder("Select user or bot to grant whitelist exemption...")
+    )
+
+    wl_lines = [f"• `{e_id}`: {d.get('name', 'Entity')} (All Events)" for e_id, d in list(whitelists.items())[:5]]
+    wl_summary = "\n".join(wl_lines) if wl_lines else "*No entity whitelists configured (Optional)*"
 
     desc = (
-        f"Select the defensive posture for **{guild.name}**:\n\n"
-        f"• **Hard Zero-Tolerance (`hard`):** {EMOJIS.get('danger', '⚡')} {hard_desc} *(Active Mode)*\n\n"
-        f"• **Ultimate Defence Wall (`ultimate`):** {EMOJIS.get('lock', '🔒')} {ultimate_desc}\n\n"
-        f"• **Hybrid Dynamic Defense (`hybrid`):** {EMOJIS.get('lock', '🔒')} {hybrid_desc}\n\n"
-        f"-# *Notice: Only enabled modes may be activated. Hard mode operates within Discord's native hierarchy.*"
+        f"Whitelists exempt trusted moderators or automation bots from anti-nuke sanctions.\n\n"
+        f"**Configured Whitelists ({len(whitelists)}):**\n"
+        f"{wl_summary}\n\n"
+        f"-# *You can fine-tune role, channel, and category exemptions later via `$whitelist`. Click Skip to proceed.*"
     )
 
-    action_row_1 = (
+    nav_row = (
         ActionRowBuilder()
         .add_button(
             ButtonBuilder()
-            .set_custom_id(f"an_wiz:set_mode:hard:{guild.id}")
-            .set_label("Hard Zero-Tolerance" + (" (Active)" if current_mode == "hard" else ""))
-            .set_style(ButtonStyle.Success if current_mode == "hard" else ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("danger", "⚡"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:set_mode:ultimate:{guild.id}")
-            .set_label("Ultimate Wall (Disabled)")
-            .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("lock", "🔒"))
-            .set_disabled(True)
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:set_mode:hybrid:{guild.id}")
-            .set_label("Hybrid (Disabled)")
-            .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("lock", "🔒"))
-            .set_disabled(True)
-        )
-    )
-
-    action_row_2 = (
-        ActionRowBuilder()
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step1:{guild.id}")
+            .set_custom_id(f"an_wiz:step9:{guild.id}")
             .set_label("Back")
             .set_style(ButtonStyle.Secondary)
             .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
         )
         .add_button(
             ButtonBuilder()
-            .set_custom_id(f"an_wiz:step3:{guild.id}")
-            .set_label("Next: Event Scope")
+            .set_custom_id(f"an_wiz:step11:{guild.id}")
+            .set_label("Continue: Final Review")
             .set_style(ButtonStyle.Primary)
             .set_emoji(EMOJIS.get("arrow_right", "➡️"))
         )
@@ -223,277 +924,99 @@ async def build_wizard_step2_view(guild: discord.Guild) -> Any:
     return (
         ContainerBuilder()
         .set_accent_color(COLORS.get("info", "#0844C5"))
-        .add_text_display(f"### {EMOJIS.get('gear', '⚙️')} {get_string('security.antinuke.wizard_step2_title', 'Setup Step 2/6: Defensive Operating Mode')}")
+        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} Setup Step 10/{TOTAL_STEPS}: Whitelist Exemptions")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"Selected Mode: **{AntiNukeManager.get_mode_display_name(current_mode)}**\n\n{desc}")
+        .add_text_display(desc)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 2 of 6")
-        .add_action_row(action_row_1)
-        .add_action_row(action_row_2)
+        .add_action_row(ActionRowBuilder().add_select_menu(user_select))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 10 of {TOTAL_STEPS}")
         .build()
     )
 
 
-async def build_wizard_step3_view(guild: discord.Guild) -> Any:
-    """Step 3: Event Monitoring Scope Selection."""
+# ==============================================================================
+# Step 11: Final Review & Confirmation
+# ==============================================================================
+async def build_wizard_step11_view(guild: discord.Guild) -> Any:
+    """Step 11/11: Final Review & Confirmation."""
     sess = get_or_create_wizard_session(guild)
-    sess["step"] = 3
-    sess["completed_steps"].add(3)
+    sess["step"] = 11
 
-    monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
-    is_all = (len(monitored) >= len(AntiNukeConstants.ALL_EVENTS))
-
-    desc = (
-        f"Select the gateway events to monitor in real-time. Anti-Nuke actively observes **24 critical vectors**:\n\n"
-        f"• **Server:** Server Settings, Integrations, Emojis, Stickers\n"
-        f"• **Structure:** Channels, Threads, Categories, Webhooks\n"
-        f"• **Permissions:** Roles, Member Roles, Overwrites, AutoMod Rules\n"
-        f"• **Moderation:** Bans, Kicks, Rogue Bot Adds, Invites, Audit Logs\n\n"
-        f"Currently Monitoring: **{len(monitored)} / {len(AntiNukeConstants.ALL_EVENTS)} events**"
-    )
-
-    action_row_1 = (
-        ActionRowBuilder()
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:events_all:{guild.id}")
-            .set_label("Monitor All 24 Events (Recommended)")
-            .set_style(ButtonStyle.Success if is_all else ButtonStyle.Primary)
-            .set_emoji(EMOJIS.get("check", "✅"))
-        )
-    )
-
-    action_row_2 = (
-        ActionRowBuilder()
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step2:{guild.id}")
-            .set_label("Back")
-            .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step4:{guild.id}")
-            .set_label("Next: Punishments")
-            .set_style(ButtonStyle.Primary)
-            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:cancel:{guild.id}")
-            .set_label("Cancel")
-            .set_style(ButtonStyle.Danger)
-            .set_emoji(EMOJIS.get("cross", "❌"))
-        )
-    )
-
-    return (
-        ContainerBuilder()
-        .set_accent_color(COLORS.get("info", "#0844C5"))
-        .add_text_display(f"### {EMOJIS.get('tools', '🔧')} {get_string('security.antinuke.wizard_step3_title', 'Setup Step 3/6: Event Monitoring Scope')}")
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(desc)
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 3 of 6")
-        .add_action_row(action_row_1)
-        .add_action_row(action_row_2)
-        .build()
-    )
-
-
-async def build_wizard_step4_view(guild: discord.Guild) -> Any:
-    """Step 4: Punishments & Thresholds Review."""
-    sess = get_or_create_wizard_session(guild)
-    sess["step"] = 4
-    sess["completed_steps"].add(4)
-    mode = sess.get("mode", AntiNukeConstants.MODE_ULTIMATE)
-
-    desc = (
-        f"Review disciplinary response templates for **{AntiNukeManager.get_mode_display_name(mode)}**:\n\n"
-        f"• **Critical Events** (Bans, Kicks, Role Deletes, Rogue Bots): **BAN**\n"
-        f"• **High Events** (Channels, Role Escalations, Webhooks): **QUARANTINE / STRIP ROLES**\n"
-        f"• **Medium Events** (Invites, Scheduled Events): **TIMEOUT**\n\n"
-        f"-# *Note:* You can fine-tune punishment rules per event at any time via `$punishment`."
-    )
-
-    action_row = (
-        ActionRowBuilder()
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step3:{guild.id}")
-            .set_label("Back")
-            .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step5:{guild.id}")
-            .set_label("Next: Logging Channels")
-            .set_style(ButtonStyle.Primary)
-            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:cancel:{guild.id}")
-            .set_label("Cancel")
-            .set_style(ButtonStyle.Danger)
-            .set_emoji(EMOJIS.get("cross", "❌"))
-        )
-    )
-
-    return (
-        ContainerBuilder()
-        .set_accent_color(COLORS.get("info", "#0844C5"))
-        .add_text_display(f"### {EMOJIS.get('danger', '⚡')} {get_string('security.antinuke.wizard_step4_title', 'Setup Step 4/6: Punishments & Thresholds')}")
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(desc)
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 4 of 6")
-        .add_action_row(action_row)
-        .build()
-    )
-
-
-async def build_wizard_step5_view(guild: discord.Guild, current_ch_id: Optional[int] = None) -> Any:
-    """Step 5: Alert & Log Channels Configuration."""
-    sess = get_or_create_wizard_session(guild)
-    sess["step"] = 5
-    sess["completed_steps"].add(5)
-
-    warn_ch = sess.get("warning_channel_id")
-    log_ch = sess.get("log_channel_id")
-
-    warn_str = f"<#{warn_ch}>" if warn_ch else "*Not Assigned*"
-    log_str = f"<#{log_ch}>" if log_ch else "*Not Assigned*"
-
-    desc = (
-        f"Configure channels where security alerts and audit records are posted:\n\n"
-        f"• **Warning & Forensic Channel:** {warn_str}\n"
-        f"• **Audit Log Channel:** {log_str}\n\n"
-        f"Click the button below to bind the current channel (<#{current_ch_id}>) as the security alert channel, "
-        f"or proceed to use server defaults."
-    )
-
-    action_row_1 = ActionRowBuilder()
-    if current_ch_id:
-        action_row_1.add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:bind_ch:{guild.id}:{current_ch_id}")
-            .set_label(f"Bind Current Channel as Alert Channel")
-            .set_style(ButtonStyle.Success)
-            .set_emoji(EMOJIS.get("channel", "📍"))
-        )
-
-    action_row_2 = (
-        ActionRowBuilder()
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step4:{guild.id}")
-            .set_label("Back")
-            .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step6:{guild.id}")
-            .set_label("Next: Final Activation")
-            .set_style(ButtonStyle.Primary)
-            .set_emoji(EMOJIS.get("arrow_right", "➡️"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:cancel:{guild.id}")
-            .set_label("Cancel")
-            .set_style(ButtonStyle.Danger)
-            .set_emoji(EMOJIS.get("cross", "❌"))
-        )
-    )
-
-    builder = (
-        ContainerBuilder()
-        .set_accent_color(COLORS.get("info", "#0844C5"))
-        .add_text_display(f"### {EMOJIS.get('channel', '📢')} {get_string('security.antinuke.wizard_step5_title', 'Setup Step 5/6: Alert & Log Channels')}")
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(desc)
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 5 of 6")
-    )
-    if current_ch_id:
-        builder.add_action_row(action_row_1)
-    builder.add_action_row(action_row_2)
-    return builder.build()
-
-
-async def build_wizard_step6_view(guild: discord.Guild) -> Any:
-    """Step 6: Review & Final System Activation."""
-    sess = get_or_create_wizard_session(guild)
-    sess["step"] = 6
-
-    # Validate that prerequisites are covered
-    mode = sess.get("mode", AntiNukeConstants.MODE_ULTIMATE)
+    mode = sess.get("mode", AntiNukeConstants.MODE_HARD)
     monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
     warn_ch = sess.get("warning_channel_id")
     log_ch = sess.get("log_channel_id")
+    tbs = sess.get("ticket_bots", [])
+    eos = sess.get("extra_owners", [])
+    wls = sess.get("whitelists", {})
 
-    warn_str = f"<#{warn_ch}>" if warn_ch else "*Default Guild System*"
-    log_str = f"<#{log_ch}>" if log_ch else "*Default Guild System*"
+    can_activate = bool(warn_ch and log_ch)
+
+    warn_str = f"<#{warn_ch}>" if warn_ch else f"{EMOJIS.get('cross', '❌')} **Missing Required Selection**"
+    log_str = f"<#{log_ch}>" if log_ch else f"{EMOJIS.get('cross', '❌')} **Missing Required Selection**"
 
     me = guild.me
     higher_roles = [r for r in guild.roles if r.position >= me.top_role.position and not r.is_default() and r != me.top_role]
-    hierarchy_str = f"{EMOJIS.get('check', '✅')} Bot Top Role Positioned" if not higher_roles else f"{EMOJIS.get('warning', '⚠️')} {len(higher_roles)} role(s) above bot"
-    perms_str = f"{EMOJIS.get('check', '✅')} Administrator / Moderation Permissions Verified"
+    hierarchy_str = f"{EMOJIS.get('check', '✅')} Safe" if not higher_roles else f"{EMOJIS.get('warning', '⚠️')} {len(higher_roles)} higher role(s)"
 
     summary_text = (
-        f"**Anti-Nuke Configuration Summary:**\n"
-        f"• **Target Guild:** `{guild.name}` (`{guild.id}`)\n"
-        f"• **Operating Mode:** **`{AntiNukeManager.get_mode_display_name(mode)}`**\n"
-        f"• **Active Monitored Vectors:** `{len(monitored)}` events\n"
+        f"**Final Security Configuration Review:**\n\n"
+        f"• **Operating Mode:** `{AntiNukeManager.get_mode_display_name(mode)}`\n"
+        f"• **Monitored Vectors:** `{len(monitored)} / {len(AntiNukeConstants.ALL_EVENTS)}` events\n"
         f"• **Role Hierarchy Check:** {hierarchy_str}\n"
-        f"• **Permissions Check:** {perms_str}\n"
         f"• **Warning Channel:** {warn_str}\n"
-        f"• **Log Channel:** {log_str}\n\n"
-        f"Click **Activate Anti-Nuke Defense** to finalize setup and initialize real-time gateway defense."
+        f"• **Log Channel:** {log_str}\n"
+        f"• **Ticket Bots:** `{len(tbs)}` approved\n"
+        f"• **Extra Owners:** `{len(eos)}` authorized\n"
+        f"• **Whitelists:** `{len(wls)}` entities\n\n"
     )
 
-    action_row = (
-        ActionRowBuilder()
-        .add_button(
+    if can_activate:
+        summary_text += f"{EMOJIS.get('check', '✅')} All required settings have been explicitly configured. Click **Confirm & Activate Anti-Nuke** to save permanently."
+    else:
+        summary_text += f"{EMOJIS.get('cross', '❌')} Please navigate Back to configure required Warning and Log channels before activating."
+
+    action_row = ActionRowBuilder()
+    if can_activate:
+        action_row.add_button(
             ButtonBuilder()
             .set_custom_id(f"an_wiz:complete:{guild.id}")
-            .set_label("Activate Anti-Nuke Defense")
+            .set_label("Confirm & Activate Anti-Nuke")
             .set_style(ButtonStyle.Success)
             .set_emoji(EMOJIS.get("shield", "🛡️"))
         )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:step5:{guild.id}")
-            .set_label("Back")
-            .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
-        )
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"an_wiz:cancel:{guild.id}")
-            .set_label("Cancel")
-            .set_style(ButtonStyle.Danger)
-            .set_emoji(EMOJIS.get("cross", "❌"))
-        )
+    action_row.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:step10:{guild.id}")
+        .set_label("Back")
+        .set_style(ButtonStyle.Secondary)
+        .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+    )
+    action_row.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:cancel:{guild.id}")
+        .set_label("Cancel")
+        .set_style(ButtonStyle.Danger)
+        .set_emoji(EMOJIS.get("cross", "❌"))
     )
 
     return (
         ContainerBuilder()
-        .set_accent_color(COLORS.get("success", "#3FD438"))
-        .add_text_display(f"### {EMOJIS.get('check', '✅')} {get_string('security.antinuke.wizard_step6_title', 'Setup Step 6/6: Review & Final Activation')}")
+        .set_accent_color(COLORS.get("success" if can_activate else "error", "#3FD438"))
+        .add_text_display(f"### {EMOJIS.get('check', '✅')} Setup Step 11/{TOTAL_STEPS}: Review & Confirm Activation")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_text_display(summary_text)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 6 of 6")
         .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 11 of {TOTAL_STEPS}")
         .build()
     )
 
 
+# ==============================================================================
+# Command Entrypoint
+# ==============================================================================
 async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     is_slash = (str(command_type).lower() == "slash" or command_type == CommandType.SLASH)
     guild = getattr(message, "guild", None)
@@ -504,7 +1027,7 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     if not author:
         return
 
-    # Check root permission
+    # Restrict to Server Owner or Extra Owners
     if not AntiNukeManager.is_owner_or_extra_owner(guild, author.id):
         box = (
             ContainerBuilder()
@@ -520,12 +1043,31 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
 
     # Initialize fresh wizard session
     gid = str(guild.id)
+    cfg = AntiNukeManager.get_guild_config(gid)
+    enabled_modes = AntiNukeConstants.get_enabled_modes()
+    cur_mode = cfg.get("mode", AntiNukeConstants.MODE_HARD)
+    if cur_mode not in enabled_modes:
+        cur_mode = enabled_modes[0] if enabled_modes else AntiNukeConstants.MODE_HARD
+
     _WIZARD_SESSIONS[gid] = {
         "guild_id": gid,
-        "mode": AntiNukeConstants.MODE_ULTIMATE,
-        "monitored_events": list(AntiNukeConstants.ALL_EVENTS),
-        "warning_channel_id": getattr(message.channel, "id", None),
-        "log_channel_id": getattr(message.channel, "id", None),
+        "mode": cur_mode,
+        "mode_confirmed": False,
+        "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)),
+        "events_confirmed": False,
+        "thresholds": dict(cfg.get("thresholds") or get_default_thresholds(cur_mode)),
+        "threshold_active_event": AntiNukeConstants.EVENT_CHANNEL_DELETE,
+        "thresholds_confirmed": False,
+        "punishments": dict(cfg.get("punishments") or get_default_punishments(cur_mode)),
+        "punish_active_event": AntiNukeConstants.EVENT_CHANNEL_DELETE,
+        "punishments_confirmed": False,
+        "warning_channel_id": cfg.get("warning_channel_id"),
+        "warning_ch_confirmed": False,
+        "log_channel_id": cfg.get("log_channel_id"),
+        "log_ch_confirmed": False,
+        "ticket_bots": list(cfg.get("ticket_bots", [])),
+        "extra_owners": list(cfg.get("extra_owners", [])),
+        "whitelists": dict(cfg.get("whitelists", {})),
         "step": 1,
         "completed_steps": {1},
     }

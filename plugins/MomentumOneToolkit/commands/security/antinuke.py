@@ -1,6 +1,6 @@
 import re
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 import discord
 
 from config.settings import settings, COLORS, EMOJIS
@@ -23,72 +23,71 @@ name = "antinuke"
 aliases = ["an", "security"]
 description = "Enterprise Anti-Nuke defense control center, interactive configuration, and monitoring."
 category = "Security"
-usage = "antinuke [status|setup|mode|ticketbot|extraowner]"
+usage = "antinuke [dashboard|setup|mode|events|status]"
 user_permissions = ["administrator"]
 cooldown = 2.0
 guild_only = True
 
 
-def parse_entity_id(raw: str) -> Optional[str]:
-    """Extracts numeric snowflake ID from mention or raw digits."""
-    if not raw:
-        return None
-    cleaned = raw.strip()
-    m = re.match(r"^<[@#&]!?:?(\d+)>$", cleaned)
-    if m:
-        return m.group(1)
-    if re.match(r"^\d+$", cleaned):
-        return cleaned
-    return None
+# In-memory staging for dashboard event management: guild_id -> set of event keys
+_EVENT_MANAGER_STAGING: Dict[str, Set[str]] = {}
 
 
+def get_staged_events(guild_id: str | int) -> Set[str]:
+    gid = str(guild_id)
+    if gid not in _EVENT_MANAGER_STAGING:
+        cfg = AntiNukeManager.get_guild_config(gid)
+        _EVENT_MANAGER_STAGING[gid] = set(cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS))
+    return _EVENT_MANAGER_STAGING[gid]
+
+
+def set_staged_events(guild_id: str | int, events: Set[str]) -> None:
+    _EVENT_MANAGER_STAGING[str(guild_id)] = set(events)
+
+
+def clear_staged_events(guild_id: str | int) -> None:
+    _EVENT_MANAGER_STAGING.pop(str(guild_id), None)
+
+
+# ==============================================================================
+# Compact Anti-Nuke Dashboard
+# ==============================================================================
 async def build_dashboard_view(guild: discord.Guild) -> Any:
-    """Builds the comprehensive interactive Anti-Nuke Dashboard Container using Discord Components V2."""
+    """Builds the compact, focused Anti-Nuke Dashboard Container using Discord Components V2."""
     cfg = AntiNukeManager.get_guild_config(str(guild.id))
     is_setup = cfg.get("setup_completed", False)
     is_enabled = cfg.get("enabled", False)
     mode = cfg.get("mode", AntiNukeConstants.MODE_HARD)
 
-    # Validate mode against enabled feature flags
     if not AntiNukeConstants.is_mode_enabled(mode):
         mode = AntiNukeConstants.MODE_HARD
 
     mode_display = AntiNukeManager.get_mode_display_name(mode)
     monitored_events = cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
-    extra_owners = cfg.get("extra_owners", [])
-    whitelists = cfg.get("whitelists", {})
-    ticket_bots = cfg.get("ticket_bots", [])
-
-    warning_ch_id = cfg.get("warning_channel_id")
-    warning_ch_str = f"<#{warning_ch_id}>" if warning_ch_id else "*Not Configured*"
     log_ch_id = cfg.get("log_channel_id")
     log_ch_str = f"<#{log_ch_id}>" if log_ch_id else "*Not Configured*"
+    warn_ch_id = cfg.get("warning_channel_id")
+    warn_ch_str = f"<#{warn_ch_id}>" if warn_ch_id else "*Not Configured*"
 
     if not is_setup:
-        status_line = f"{EMOJIS.get('warning', '⚠️')} Defense Status: **INCOMPLETE SETUP** (Monitoring Inactive)"
+        status_line = f"{EMOJIS.get('warning', '⚠️')} Defense Status: **SETUP REQUIRED** (Monitoring Inactive)"
     elif is_enabled:
         status_line = f"{EMOJIS.get('enabled', '✅')} Defense Status: **ACTIVE & MONITORING**"
     else:
         status_line = f"{EMOJIS.get('disabled', '❌')} Defense Status: **PAUSED / DISABLED**"
 
-    mode_desc = get_string(
-        f"security.antinuke.mode_descriptions.{mode}",
-        "Strict protection against suspicious destructive server changes, applying the configured thresholds and punishments."
-    )
-
-    overview_text = (
-        f"• **Active Security Mode:** `{mode_display}`\n"
-        f"• **Monitored Vectors:** `{len(monitored_events)}` / 24 gateway events actively guarded\n"
-        f"• **Whitelisted Entities:** `{len(whitelists)}` authorized\n"
-        f"• **Extra Owners:** `{len(extra_owners)}` configured\n"
-        f"• **Exempt Ticket Bots:** `{len(ticket_bots)}` approved\n"
-        f"• **Alert Channel:** {warning_ch_str}\n"
-        f"• **Log Channel:** {log_ch_str}"
-    )
-
     c_accent = COLORS.get("success" if (is_setup and is_enabled) else "warning", "#0844C5")
 
-    # Row 1: Core Navigation & Toggle Buttons
+    summary_text = (
+        f"{status_line}\n\n"
+        f"• **Active Security Mode:** `{mode_display}`\n"
+        f"• **Enabled Monitored Events:** `{len(monitored_events)} / {len(AntiNukeConstants.ALL_EVENTS)}` vectors\n"
+        f"• **Incident Forensics Log:** {log_ch_str}\n"
+        f"• **Security Warning Channel:** {warn_ch_str}\n\n"
+        f"Use the **Manage Settings** menu below to navigate focused configuration panels."
+    )
+
+    # Row 1: Primary Controls
     action_row_1 = ActionRowBuilder()
     if is_setup:
         action_row_1.add_button(
@@ -107,68 +106,52 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
             .set_emoji(EMOJIS.get("wrench", "🔧"))
         )
 
+    # Dedicated "Manage Events" button
     action_row_1.add_button(
         ButtonBuilder()
-        .set_custom_id(f"an_wl:main:{guild.id}")
-        .set_label("Whitelists")
+        .set_custom_id(f"an:panel:events:{guild.id}")
+        .set_label("Manage Events")
         .set_style(ButtonStyle.Primary)
-        .set_emoji(EMOJIS.get("members", "👥"))
+        .set_emoji(EMOJIS.get("tools", "🔧"))
     )
     action_row_1.add_button(
         ButtonBuilder()
         .set_custom_id(f"an_pn:dashboard:{guild.id}")
         .set_label("Punishments")
-        .set_style(ButtonStyle.Primary)
+        .set_style(ButtonStyle.Secondary)
         .set_emoji(EMOJIS.get("danger", "⚡"))
     )
     action_row_1.add_button(
         ButtonBuilder()
         .set_custom_id(f"an_th:dashboard:{guild.id}")
         .set_label("Thresholds")
-        .set_style(ButtonStyle.Primary)
+        .set_style(ButtonStyle.Secondary)
         .set_emoji(EMOJIS.get("gear", "⚙️"))
     )
 
-    # Row 2: Native Channel Select for Warning / Alert Channel
-    sel_warn = (
+    # Row 2: "Manage Settings" String Select Menu
+    settings_select = (
         SelectMenuBuilder()
-        .set_type(SelectMenuTypes.CHANNEL)
-        .set_custom_id(f"an:set_warning_ch:{guild.id}")
-        .set_placeholder("Set alert / warning channel...")
+        .set_custom_id(f"an:panel_select:{guild.id}")
+        .set_placeholder("Manage Settings — Select a focused control panel...")
     )
+    panels = [
+        ("Anti-Nuke Overview", "overview", "Full configuration and defense posture summary"),
+        ("Security Settings", "security", "Operating defense mode and live monitoring switch"),
+        ("Event Manager", "events", "Enable or disable individual monitored vectors"),
+        ("Threshold Manager", "thresholds", "Action count limits and sliding time windows"),
+        ("Punishment Manager", "punishments", "Configure disciplinary action per vector"),
+        ("Access Manager", "access", "Review server security authorities and roles"),
+        ("Whitelist Manager", "whitelist", "Exempt trusted users, roles, and channels"),
+        ("Logging & Warning Channels", "channels", "Configure incident alert and log channels"),
+        ("Ticket Bot Exemptions", "ticketbots", "Exempt ticket bots from channel operations"),
+        ("Extra Owners", "extraowners", "Designate high-trust security co-owners"),
+        ("Permission Manager", "permissions", "Audit bot hierarchy, permissions, and roles"),
+    ]
+    for label, val, p_desc in panels:
+        settings_select.add_option(label=label[:100], value=val, description=p_desc[:100])
 
-    # Row 3: Native Channel Select for Log Channel
-    sel_log = (
-        SelectMenuBuilder()
-        .set_type(SelectMenuTypes.CHANNEL)
-        .set_custom_id(f"an:set_log_ch:{guild.id}")
-        .set_placeholder("Set incident forensics log channel...")
-    )
-
-    # Row 4: Native User Select for Ticket Bot
-    sel_tb = (
-        SelectMenuBuilder()
-        .set_type(SelectMenuTypes.USER)
-        .set_custom_id(f"an:add_ticket_bot:{guild.id}")
-        .set_placeholder("Exempt a ticket bot from channel churn...")
-    )
-
-    # Row 5: Operating Mode String Select (Enabled modes only)
-    sel_mode = (
-        SelectMenuBuilder()
-        .set_custom_id(f"an:select_mode:{guild.id}")
-        .set_placeholder("Change operating mode...")
-    )
-    enabled_modes = AntiNukeConstants.get_enabled_modes()
-    for m in enabled_modes:
-        sel_mode.add_option(
-            label=AntiNukeManager.get_mode_display_name(m),
-            value=m,
-            description="Strict protection against suspicious destructive server changes",
-            default=(m == mode)
-        )
-
-    # Row 6: Utility Buttons
+    # Row 3: Utility Controls
     action_row_nav = (
         ActionRowBuilder()
         .add_button(
@@ -180,10 +163,10 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
         )
         .add_button(
             ButtonBuilder()
-            .set_custom_id(f"an:view_eo:{guild.id}")
-            .set_label("Extra Owners")
+            .set_custom_id(f"an_wl:main:{guild.id}")
+            .set_label("Whitelists")
             .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("crown", "👑"))
+            .set_emoji(EMOJIS.get("members", "👥"))
         )
         .add_button(
             ButtonBuilder()
@@ -199,24 +182,542 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
         .set_accent_color(c_accent)
         .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} {settings.BOT_NAME} Anti-Nuke Control Center")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(
-            f"{status_line}\n\n"
-            f"{overview_text}\n\n"
-            f"**Operating Mode Details:**\n"
-            f"> {mode_desc}\n\n"
-            f"-# *Notice: Bot enforces actions within Discord's native permission and role hierarchy.*"
-        )
+        .add_text_display(summary_text)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_action_row(action_row_1)
-        .add_action_row(ActionRowBuilder().add_select_menu(sel_warn))
-        .add_action_row(ActionRowBuilder().add_select_menu(sel_log))
-        .add_action_row(ActionRowBuilder().add_select_menu(sel_tb))
-        .add_action_row(ActionRowBuilder().add_select_menu(sel_mode))
+        .add_action_row(ActionRowBuilder().add_select_menu(settings_select))
         .add_action_row(action_row_nav)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Infrastructure • Enterprise Sentinel")
         .build()
     )
 
 
+# ==============================================================================
+# Focused Management Panels (In-Place Message Editing)
+# ==============================================================================
+
+async def build_overview_panel(guild: discord.Guild) -> Any:
+    """Panel: Anti-Nuke Overview."""
+    cfg = AntiNukeManager.get_guild_config(str(guild.id))
+    mode = cfg.get("mode", AntiNukeConstants.MODE_HARD)
+    monitored = cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    eos = cfg.get("extra_owners", [])
+    wls = cfg.get("whitelists", {})
+    tbs = cfg.get("ticket_bots", [])
+    warn_ch = cfg.get("warning_channel_id")
+    log_ch = cfg.get("log_channel_id")
+
+    desc = (
+        f"**Comprehensive Server Defense Posture:**\n\n"
+        f"• **Setup Status:** `{'Completed' if cfg.get('setup_completed') else 'Incomplete'}`\n"
+        f"• **Defense State:** `{'Active' if cfg.get('enabled') else 'Paused'}`\n"
+        f"• **Operating Mode:** `{AntiNukeManager.get_mode_display_name(mode)}`\n"
+        f"• **Monitored Vectors:** `{len(monitored)} / {len(AntiNukeConstants.ALL_EVENTS)}` events\n"
+        f"• **Warning Channel:** {f'<#{warn_ch}>' if warn_ch else '*Not Set*'}\n"
+        f"• **Forensics Log Channel:** {f'<#{log_ch}>' if log_ch else '*Not Set*'}\n"
+        f"• **Extra Owners:** `{len(eos)}` users\n"
+        f"• **Exempt Ticket Bots:** `{len(tbs)}` bots\n"
+        f"• **Whitelisted Entities:** `{len(wls)}` rules\n"
+    )
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:panel:overview:{guild.id}")
+            .set_label("Refresh")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("refresh", "🔄"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} Anti-Nuke Overview")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Anti-Nuke Sentinel")
+        .build()
+    )
+
+
+async def build_security_panel(guild: discord.Guild) -> Any:
+    """Panel: Security Settings (Mode & Active Toggle)."""
+    cfg = AntiNukeManager.get_guild_config(str(guild.id))
+    cur_mode = cfg.get("mode", AntiNukeConstants.MODE_HARD)
+    is_enabled = cfg.get("enabled", False)
+
+    mode_select = (
+        SelectMenuBuilder()
+        .set_custom_id(f"an:select_mode:{guild.id}")
+        .set_placeholder("Select defensive operating mode...")
+    )
+    for m in AntiNukeConstants.get_enabled_modes():
+        mode_select.add_option(
+            label=AntiNukeManager.get_mode_display_name(m),
+            value=m,
+            description="Strict protection against destructive changes.",
+            default=(m == cur_mode)
+        )
+
+    toggle_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:toggle:{guild.id}")
+            .set_label("Deactivate Defense" if is_enabled else "Activate Defense")
+            .set_style(ButtonStyle.Danger if is_enabled else ButtonStyle.Success)
+            .set_emoji(EMOJIS.get("shield", "🛡️"))
+        )
+    )
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+    )
+
+    desc = (
+        f"Manage global defense switch and security mode:\n\n"
+        f"• **Current State:** `{'Active & Guarding' if is_enabled else 'Paused / Disabled'}`\n"
+        f"• **Active Mode:** `{AntiNukeManager.get_mode_display_name(cur_mode)}`\n"
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('gear', '⚙️')} Security Settings")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(mode_select))
+        .add_action_row(toggle_row)
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Anti-Nuke Sentinel")
+        .build()
+    )
+
+
+async def build_event_manager_panel(guild: discord.Guild, staged_events: Optional[Set[str]] = None) -> Any:
+    """
+    Panel: Focused Event Manager.
+    Allows enabling/disabling monitored events with String Select Menu, Save, Cancel, and Back.
+    """
+    if staged_events is None:
+        staged_events = get_staged_events(guild.id)
+
+    # String select menu for monitored events
+    event_select = (
+        SelectMenuBuilder()
+        .set_custom_id(f"an:ev_menu:{guild.id}")
+        .set_placeholder("Select events to monitor (multi-selection supported)...")
+        .set_min_values(1)
+        .set_max_values(min(24, len(AntiNukeConstants.ALL_EVENTS)))
+    )
+
+    for ev in AntiNukeConstants.ALL_EVENTS:
+        name = AntiNukeConstants.get_event_display_name(ev)
+        desc = AntiNukeConstants.get_event_description(ev)
+        event_select.add_option(
+            label=name[:100],
+            value=ev,
+            description=desc[:100],
+            default=(ev in staged_events)
+        )
+
+    is_all = (len(staged_events) >= len(AntiNukeConstants.ALL_EVENTS))
+
+    action_row_quick = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:ev_select_all:{guild.id}")
+            .set_label("Select All 24 Events")
+            .set_style(ButtonStyle.Success if is_all else ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("check", "✅"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:ev_save:{guild.id}")
+            .set_label("Save Event Configuration")
+            .set_style(ButtonStyle.Success)
+            .set_emoji(EMOJIS.get("check", "✅"))
+        )
+    )
+
+    action_row_nav = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:ev_cancel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+    )
+
+    desc = (
+        f"Configure which gateway events are monitored in real-time.\n\n"
+        f"• **Currently Selected:** **{len(staged_events)} / {len(AntiNukeConstants.ALL_EVENTS)} events**\n"
+        f"• **Enforcement Notice:** Disabled events will be ignored by anti-nuke monitors.\n\n"
+        f"-# *Select the desired events from the menu, then click **Save Event Configuration** to persist.*"
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('tools', '🔧')} Monitored Event Manager")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(event_select))
+        .add_action_row(action_row_quick)
+        .add_action_row(action_row_nav)
+        .add_text_display(f"-# {settings.BOT_NAME} Event Management")
+        .build()
+    )
+
+
+async def build_channels_panel(guild: discord.Guild) -> Any:
+    """Panel: Logging & Warning Channels."""
+    cfg = AntiNukeManager.get_guild_config(str(guild.id))
+    warn_ch = cfg.get("warning_channel_id")
+    log_ch = cfg.get("log_channel_id")
+
+    warn_str = f"<#{warn_ch}> (`{warn_ch}`)" if warn_ch else "*Not Assigned*"
+    log_str = f"<#{log_ch}> (`{log_ch}`)" if log_ch else "*Not Assigned*"
+
+    sel_warn = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.CHANNEL)
+        .set_custom_id(f"an:set_warning_ch:{guild.id}")
+        .set_placeholder("Select Security Warning Channel...")
+    )
+
+    sel_log = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.CHANNEL)
+        .set_custom_id(f"an:set_log_ch:{guild.id}")
+        .set_placeholder("Select Incident Forensics Log Channel...")
+    )
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+    )
+
+    desc = (
+        f"Configure destination channels for real-time security alerts and audit logging:\n\n"
+        f"• **Security Warning Channel:** {warn_str}\n"
+        f"• **Incident Forensics Log:** {log_str}\n\n"
+        f"-# *Select a channel using the native menus below to update immediately.*"
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('channel', '📢')} Security Channels")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(sel_warn))
+        .add_action_row(ActionRowBuilder().add_select_menu(sel_log))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Forensic Dispatch")
+        .build()
+    )
+
+
+async def build_ticket_bots_panel(guild: discord.Guild) -> Any:
+    """Panel: Ticket Bot Exemptions."""
+    cfg = AntiNukeManager.get_guild_config(str(guild.id))
+    tbs = cfg.get("ticket_bots", [])
+
+    sel_user = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.USER)
+        .set_custom_id(f"an:add_ticket_bot:{guild.id}")
+        .set_placeholder("Select ticket bot to add or exempt...")
+    )
+
+    tb_lines = [f"• <@{b_id}> (`{b_id}`)" for b_id in tbs]
+    tb_summary = "\n".join(tb_lines) if tb_lines else "*No ticket bots currently exempted.*"
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:clear_ticket_bots:{guild.id}")
+            .set_label("Clear All Ticket Bots")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("trash", "🗑️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+    )
+
+    desc = (
+        f"Exempt ticket bot accounts from channel creation and deletion rate-limits:\n\n"
+        f"**Approved Ticket Bots ({len(tbs)}):**\n"
+        f"{tb_summary}\n\n"
+        f"-# *Select a bot from the user menu below to grant exemption.*"
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('ticket', '🎫')} Ticket Bot Exemptions")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(sel_user))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Ticket Protection")
+        .build()
+    )
+
+
+async def build_extra_owners_panel(guild: discord.Guild) -> Any:
+    """Panel: Extra Owners."""
+    cfg = AntiNukeManager.get_guild_config(str(guild.id))
+    eos = cfg.get("extra_owners", [])
+
+    sel_user = (
+        SelectMenuBuilder()
+        .set_type(SelectMenuTypes.USER)
+        .set_custom_id(f"an:add_extra_owner:{guild.id}")
+        .set_placeholder("Select user to grant Extra Owner status...")
+    )
+
+    eo_lines = [f"• Root Owner: <@{guild.owner_id}> (`{guild.owner_id}`)"]
+    for uid in eos:
+        eo_lines.append(f"• Extra Owner: <@{uid}> (`{uid}`)")
+    eo_summary = "\n".join(eo_lines)
+
+    nav_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+    )
+
+    desc = (
+        f"{EMOJIS.get('warning', '⚠️')} **Application Privilege Notice:**\n"
+        f"Extra Owners hold application-level anti-nuke administrative privileges within {settings.BOT_NAME}. "
+        f"They do **not** receive Discord guild ownership or native server permissions.\n\n"
+        f"**Security Authorities:**\n"
+        f"{eo_summary}\n\n"
+        f"-# *Select a user below to designate an Extra Owner. Only the Server Owner can grant or revoke this status.*"
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("warning", "#F59E0B"))
+        .add_text_display(f"### {EMOJIS.get('crown', '👑')} Anti-Nuke Extra Owners")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(ActionRowBuilder().add_select_menu(sel_user))
+        .add_action_row(nav_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Governance")
+        .build()
+    )
+
+
+async def build_access_panel(guild: discord.Guild) -> Any:
+    """Panel: Access Manager."""
+    cfg = AntiNukeManager.get_guild_config(str(guild.id))
+    eos = cfg.get("extra_owners", [])
+    wls = cfg.get("whitelists", {})
+    tbs = cfg.get("ticket_bots", [])
+
+    desc = (
+        f"**Security Access & Authority Governance:**\n\n"
+        f"• **Root Server Owner:** <@{guild.owner_id}> (`{guild.owner_id}`)\n"
+        f"• **Configured Extra Owners:** `{len(eos)}` users\n"
+        f"• **Whitelisted Entities:** `{len(wls)}` rules\n"
+        f"• **Exempt Ticket Bots:** `{len(tbs)}` bots\n\n"
+        f"Click the buttons below to manage individual access layers."
+    )
+
+    nav_row_1 = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_wl:main:{guild.id}")
+            .set_label("Manage Whitelists")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("members", "👥"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:panel:extraowners:{guild.id}")
+            .set_label("Manage Extra Owners")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("crown", "👑"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:panel:ticketbots:{guild.id}")
+            .set_label("Manage Ticket Bots")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("ticket", "🎫"))
+        )
+    )
+
+    nav_row_2 = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('lock', '🔒')} Security Access Manager")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(nav_row_1)
+        .add_action_row(nav_row_2)
+        .add_text_display(f"-# {settings.BOT_NAME} Access Governance")
+        .build()
+    )
+
+
+async def build_permission_manager_panel(guild: discord.Guild) -> Any:
+    """Panel: Permission Manager (Bot Hierarchy, Discord Permissions & Dangerous Native Roles)."""
+    me = guild.me
+
+    # 1. Bot Discord permissions check
+    perm_checks = [
+        ("administrator", "Administrator"),
+        ("ban_members", "Ban Members"),
+        ("kick_members", "Kick Members"),
+        ("manage_roles", "Manage Roles"),
+        ("manage_channels", "Manage Channels"),
+        ("view_audit_log", "View Audit Log"),
+    ]
+    perm_lines = []
+    for attr, name in perm_checks:
+        has_it = getattr(me.guild_permissions, attr, False) or me.guild_permissions.administrator
+        icon = EMOJIS.get("check", "✅") if has_it else EMOJIS.get("cross", "❌")
+        perm_lines.append(f"{icon} `{name}`")
+
+    # 2. Hierarchy position check
+    higher_roles = [r for r in guild.roles if r.position >= me.top_role.position and not r.is_default() and r != me.top_role]
+    if not higher_roles:
+        hierarchy_str = f"{EMOJIS.get('check', '✅')} **Safe**: Bot role `{me.top_role.name}` is positioned above all monitored roles."
+    else:
+        higher_names = ", ".join([f"`{r.name}`" for r in higher_roles[:4]])
+        hierarchy_str = (
+            f"{EMOJIS.get('warning', '⚠️')} **Warning**: Bot role `{me.top_role.name}` is lower than {len(higher_roles)} role(s) ({higher_names})."
+        )
+
+    # 3. Channel access check
+    cfg = AntiNukeManager.get_guild_config(str(guild.id))
+    warn_ch_id = cfg.get("warning_channel_id")
+    log_ch_id = cfg.get("log_channel_id")
+
+    ch_access_lines = []
+    for label, ch_id in [("Warning Channel", warn_ch_id), ("Log Channel", log_ch_id)]:
+        if ch_id:
+            ch = guild.get_channel(int(ch_id))
+            if ch:
+                perms = ch.permissions_for(me)
+                can_post = perms.send_messages and perms.view_channel
+                ch_icon = EMOJIS.get("check", "✅") if can_post else EMOJIS.get("cross", "❌")
+                ch_access_lines.append(f"{ch_icon} {label} (<#{ch_id}>): `{'Can Post' if can_post else 'Missing Permissions'}`")
+            else:
+                ch_access_lines.append(f"{EMOJIS.get('warning', '⚠️')} {label} (`{ch_id}`): Channel deleted or inaccessible")
+        else:
+            ch_access_lines.append(f"{EMOJIS.get('warning', '⚠️')} {label}: Not configured")
+
+    desc = (
+        f"**1. Bot Role Hierarchy:**\n"
+        f"{hierarchy_str}\n\n"
+        f"**2. Bot Administrative Permissions:**\n"
+        f"{' • '.join(perm_lines)}\n\n"
+        f"**3. Security Channel Access:**\n"
+        f"{chr(10).join(ch_access_lines)}\n"
+    )
+
+    action_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an_perm:refresh:{guild.id}")
+            .set_label("Re-Audit Permissions")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("refresh", "🔄"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"an:dashboard:{guild.id}")
+            .set_label("Back to Dashboard")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} Anti-Nuke Permission Manager")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Permission Governance")
+        .build()
+    )
+
+
+# ==============================================================================
+# Command Execution Entrypoint
+# ==============================================================================
 async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     is_slash = (str(command_type).lower() == "slash" or command_type == CommandType.SLASH)
     guild = getattr(message, "guild", None)
@@ -227,7 +728,7 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     if not author:
         return
 
-    # Check root authority: Server Owner, Extra Owner, or Bot Owner
+    # Restrict to Server Owner, Extra Owner, or Bot Owner
     if not AntiNukeManager.is_owner_or_extra_owner(guild, author.id):
         box = (
             ContainerBuilder()
@@ -242,170 +743,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         return await send_response(message, box)
 
     sub = args[0].lower() if args else "dashboard"
-    sub_args = args[1:]
 
-    # 1. SETUP WIZARD SHORTCUT
+    # Setup Wizard Shortcut
     if sub in ["setup", "wizard", "audit"]:
         from plugins.MomentumOneToolkit.commands.security.setup import build_wizard_step1_view
         view = await build_wizard_step1_view(guild)
         return await send_response(message, view)
 
-    # 2. STATUS / DASHBOARD
-    if sub in ["dashboard", "status", "info"]:
-        view = await build_dashboard_view(guild)
+    # Event Manager Shortcut
+    if sub in ["events", "event"]:
+        view = await build_event_manager_panel(guild)
         return await send_response(message, view)
 
-    # All management commands require setup to be completed first!
-    if not AntiNukeManager.is_setup_completed(guild.id):
-        view = AntiNukeManager.build_setup_required_view(guild)
-        return await send_response(message, view)
-
-    # 3. TOGGLE DEFENSE
-    if sub in ["toggle", "enable", "disable"]:
-        cfg = AntiNukeManager.get_guild_config(str(guild.id))
-        cur = cfg.get("enabled", False)
-        new_state = (not cur) if sub == "toggle" else (sub == "enable")
-        await AntiNukeManager.save_guild_config(str(guild.id), {"enabled": new_state})
-        view = await build_dashboard_view(guild)
-        return await send_response(message, view)
-
-    # 4. OPERATING MODE
-    elif sub in ["mode", "setmode"]:
-        if not sub_args:
-            view = await build_dashboard_view(guild)
-            return await send_response(message, view)
-
-        target_mode = sub_args[0].lower()
-        if not AntiNukeConstants.is_mode_enabled(target_mode):
-            box = (
-                ContainerBuilder()
-                .set_accent_color(COLORS.get("warning", "#F59E0B"))
-                .add_text_display(f"### {EMOJIS.get('warning', '⚠️')} Mode Unavailable")
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display(
-                    get_string(
-                        f"security.antinuke.mode_descriptions.{target_mode}",
-                        f"The mode `{target_mode}` is reserved for a future protection system; currently unavailable."
-                    )
-                )
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display(f"-# {settings.BOT_NAME} Security Settings")
-                .build()
-            )
-            return await send_response(message, box)
-
-        new_thresholds = get_default_thresholds(target_mode)
-        new_punishments = get_default_punishments(target_mode)
-        await AntiNukeManager.save_guild_config(str(guild.id), {
-            "mode": target_mode,
-            "thresholds": new_thresholds,
-            "punishments": new_punishments,
-        })
-        view = await build_dashboard_view(guild)
-        return await send_response(message, view)
-
-    # 5. TICKET BOT EXEMPTIONS
-    elif sub in ["ticketbot", "tb", "ticketbots"]:
-        action = sub_args[0].lower() if sub_args else "list"
-        target_str = sub_args[1] if len(sub_args) > 1 else None
-
-        cfg = AntiNukeManager.get_guild_config(str(guild.id))
-        ticket_bots = list(cfg.get("ticket_bots", []))
-
-        if action in ["list", "show"]:
-            lines = [f"• <@{bid}> (`{bid}`)" for bid in ticket_bots] if ticket_bots else ["No ticket bots configured."]
-            box = (
-                ContainerBuilder()
-                .set_accent_color(COLORS.get("info", "#0844C5"))
-                .add_text_display(f"### {EMOJIS.get('ticket', '🎫')} Approved Ticket Bot Exemptions")
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display(
-                    f"{chr(10).join(lines)}\n\n"
-                    f"-# *Note:* Approved ticket bots are exempt from channel creation/deletion churn "
-                    f"for ticket channels, while retaining strict protection against bans, kicks, and role deletes."
-                )
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display(f"-# {settings.BOT_NAME} Security Authority")
-                .build()
-            )
-            return await send_response(message, box)
-
-        target_id = parse_entity_id(target_str) if target_str else None
-        if not target_id:
-            view = await build_dashboard_view(guild)
-            return await send_response(message, view)
-
-        if action in ["add", "set"]:
-            if target_id not in ticket_bots:
-                ticket_bots.append(target_id)
-                await AntiNukeManager.save_guild_config(str(guild.id), {"ticket_bots": ticket_bots})
-            view = await build_dashboard_view(guild)
-            return await send_response(message, view)
-
-        elif action in ["remove", "del", "delete"]:
-            if target_id in ticket_bots:
-                ticket_bots.remove(target_id)
-                await AntiNukeManager.save_guild_config(str(guild.id), {"ticket_bots": ticket_bots})
-            view = await build_dashboard_view(guild)
-            return await send_response(message, view)
-
-    # 6. EXTRA OWNERS
-    elif sub in ["extraowner", "eo", "owner"]:
-        action = sub_args[0].lower() if sub_args else "list"
-        target_str = sub_args[1] if len(sub_args) > 1 else None
-
-        cfg = AntiNukeManager.get_guild_config(str(guild.id))
-        extra_owners = list(cfg.get("extra_owners", []))
-
-        if action in ["list", "show"]:
-            lines = [f"• Root Owner: <@{guild.owner_id}> (`{guild.owner_id}`)"]
-            for uid in extra_owners:
-                lines.append(f"• Extra Owner: <@{uid}> (`{uid}`)")
-
-            box = (
-                ContainerBuilder()
-                .set_accent_color(COLORS.get("info", "#0844C5"))
-                .add_text_display(f"### {EMOJIS.get('crown', '👑')} Anti-Nuke Extra Owners")
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display("\n".join(lines))
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display(f"-# Server Owner has absolute root revocation authority.")
-                .build()
-            )
-            return await send_response(message, box)
-
-        if author.id != guild.owner_id and not is_bot_owner(str(author.id)):
-            box = (
-                ContainerBuilder()
-                .set_accent_color(COLORS.get("error", "#B21F1F"))
-                .add_text_display(f"### {EMOJIS.get('denied', '🔒')} Root Owner Only")
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display(f"Only the server owner (`<@{guild.owner_id}>`) can manage Extra Owners.")
-                .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                .add_text_display(f"-# {settings.BOT_NAME} Security Hierarchy")
-                .build()
-            )
-            return await send_response(message, box)
-
-        target_id = parse_entity_id(target_str) if target_str else None
-        if not target_id:
-            view = await build_dashboard_view(guild)
-            return await send_response(message, view)
-
-        if action in ["add", "set"]:
-            if target_id not in extra_owners:
-                extra_owners.append(target_id)
-                await AntiNukeManager.save_guild_config(str(guild.id), {"extra_owners": extra_owners})
-            view = await build_dashboard_view(guild)
-            return await send_response(message, view)
-
-        elif action in ["remove", "del", "delete"]:
-            if target_id in extra_owners:
-                extra_owners.remove(target_id)
-                await AntiNukeManager.save_guild_config(str(guild.id), {"extra_owners": extra_owners})
-            view = await build_dashboard_view(guild)
-            return await send_response(message, view)
-
-    # Default fallback
+    # Default: Show Compact Dashboard
     view = await build_dashboard_view(guild)
     return await send_response(message, view)

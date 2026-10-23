@@ -21,6 +21,7 @@ from .commands.security import (
     unwhitelist,
     punishment,
     thresholds,
+    extraowner,
 )
 from .commands.tickets import ticket
 from .commands.dev import (
@@ -73,6 +74,7 @@ class Plugin(BasePlugin):
             unwhitelist,
             punishment,
             thresholds,
+            extraowner,
             ticket,
             blacklist,
             unblacklist,
