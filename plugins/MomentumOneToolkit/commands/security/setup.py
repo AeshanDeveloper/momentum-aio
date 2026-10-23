@@ -247,22 +247,22 @@ async def build_wizard_step2_view(guild: discord.Guild) -> Any:
 # Step 3: Event Monitoring Scope Selection (Multi-Select String Select Menu)
 # ==============================================================================
 async def build_wizard_step3_view(guild: discord.Guild) -> Any:
-    """Step 3/11: Event Monitoring Scope Selection (All 24 events from registry)."""
+    """Step 3/11: Event Monitoring Scope Selection (23 configurable events from registry)."""
     sess = get_or_create_wizard_session(guild)
     sess["step"] = 3
-    monitored = set(sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS))
+    monitored = set(sess.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS))
 
-    # Build String Select Menu for events
+    # Build String Select Menu for events (excluding generic internal audit log creation)
     event_select = (
         SelectMenuBuilder()
         .set_custom_id(f"an_wiz:select_events:{guild.id}")
         .set_placeholder("Select monitored events (multi-selection supported)...")
         .set_min_values(1)
-        .set_max_values(min(24, len(AntiNukeConstants.ALL_EVENTS)))
+        .set_max_values(min(23, len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)))
     )
 
-    # 24 Canonical events
-    for ev in AntiNukeConstants.ALL_EVENTS:
+    # 23 Canonical user-facing events
+    for ev in AntiNukeConstants.USER_CONFIGURABLE_EVENTS:
         name = AntiNukeConstants.get_event_display_name(ev)
         desc = AntiNukeConstants.get_event_description(ev)
         event_select.add_option(
@@ -272,13 +272,13 @@ async def build_wizard_step3_view(guild: discord.Guild) -> Any:
             default=(ev in monitored),
         )
 
-    is_all = (len(monitored) >= len(AntiNukeConstants.ALL_EVENTS))
+    is_all = (len(monitored) >= len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS))
     confirmed_badge = f"{EMOJIS.get('check', '✅')} *(Confirmed)*" if sess.get("events_confirmed") else "*(Unconfirmed Draft)*"
 
     desc = (
         f"Select the gateway events to monitor in real-time. Use the select menu to choose multiple events, "
-        f"or click **Monitor All 24 Events**.\n\n"
-        f"• **Active Scope:** **{len(monitored)} / {len(AntiNukeConstants.ALL_EVENTS)} events** {confirmed_badge}\n"
+        f"or click **Monitor All 23 Events**.\n\n"
+        f"• **Active Scope:** **{len(monitored)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)} events** {confirmed_badge}\n"
         f"• **Status:** Disabled events will not trigger rate-limiting or punishments."
     )
 
@@ -287,7 +287,7 @@ async def build_wizard_step3_view(guild: discord.Guild) -> Any:
         .add_button(
             ButtonBuilder()
             .set_custom_id(f"an_wiz:events_all:{guild.id}")
-            .set_label("Monitor All 24 Events (Recommended)")
+            .set_label("Monitor All 23 Events (Recommended)")
             .set_style(ButtonStyle.Success if is_all else ButtonStyle.Primary)
             .set_emoji(EMOJIS.get("check", "✅"))
         )

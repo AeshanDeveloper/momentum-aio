@@ -256,16 +256,31 @@ class AntiNukeService:
             return
 
         entry = await cls._fetch_audit_entry(guild, discord.AuditLogAction.kick, target_id=member.id)
-        if not entry or not entry.user:
-            return
+        executor = entry.user if (entry and entry.user) else None
+        reason = entry.reason if entry else "No reason specified"
 
-        await AntiNukeManager.record_and_evaluate_infraction(
-            guild=guild,
-            executor=entry.user,
-            event_type=AntiNukeConstants.EVENT_MEMBER_REMOVE,
-            audit_entry_id=entry.id,
-            details={"target_member": str(member), "target_id": str(member.id), "reason": entry.reason},
-        )
+        # Log moderation kick via unified webhook logger
+        if entry:
+            from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
+            await UnifiedWebhookLogger.dispatch_log(
+                guild=guild,
+                category=LogCategory.MODERATION,
+                title="Member Kicked",
+                description=f"Member {member.mention} was removed from the server.",
+                actor=executor,
+                target=member,
+                reason=reason,
+                severity=LogSeverity.LOW,
+            )
+
+        if executor:
+            await AntiNukeManager.record_and_evaluate_infraction(
+                guild=guild,
+                executor=executor,
+                event_type=AntiNukeConstants.EVENT_MEMBER_REMOVE,
+                audit_entry_id=entry.id if entry else None,
+                details={"target_member": str(member), "target_id": str(member.id), "reason": reason},
+            )
 
     # 10. MEMBER BAN
     @classmethod
@@ -274,16 +289,30 @@ class AntiNukeService:
             return
 
         entry = await cls._fetch_audit_entry(guild, discord.AuditLogAction.ban, target_id=user.id)
-        if not entry or not entry.user:
-            return
+        executor = entry.user if (entry and entry.user) else None
+        reason = entry.reason if entry else "No reason specified"
+        audit_id = entry.id if entry else None
 
-        await AntiNukeManager.record_and_evaluate_infraction(
+        from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
+        await UnifiedWebhookLogger.dispatch_log(
             guild=guild,
-            executor=entry.user,
-            event_type=AntiNukeConstants.EVENT_BAN_ADD,
-            audit_entry_id=entry.id,
-            details={"target_user": str(user), "target_id": str(user.id), "reason": entry.reason},
+            category=LogCategory.MODERATION,
+            title="Member Banned",
+            description=f"Member {user.mention} was banned from the server.",
+            actor=executor,
+            target=user,
+            reason=reason,
+            severity=LogSeverity.MEDIUM,
         )
+
+        if executor:
+            await AntiNukeManager.record_and_evaluate_infraction(
+                guild=guild,
+                executor=executor,
+                event_type=AntiNukeConstants.EVENT_BAN_ADD,
+                audit_entry_id=audit_id,
+                details={"target_user": str(user), "target_id": str(user.id), "reason": reason},
+            )
 
     # 11. MEMBER UNBAN
     @classmethod
@@ -292,16 +321,29 @@ class AntiNukeService:
             return
 
         entry = await cls._fetch_audit_entry(guild, discord.AuditLogAction.unban, target_id=user.id)
-        if not entry or not entry.user:
-            return
+        executor = entry.user if (entry and entry.user) else None
+        reason = entry.reason if entry else "No reason specified"
 
-        await AntiNukeManager.record_and_evaluate_infraction(
+        from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
+        await UnifiedWebhookLogger.dispatch_log(
             guild=guild,
-            executor=entry.user,
-            event_type=AntiNukeConstants.EVENT_BAN_REMOVE,
-            audit_entry_id=entry.id,
-            details={"target_user": str(user), "target_id": str(user.id)},
+            category=LogCategory.MODERATION,
+            title="Member Unbanned",
+            description=f"Ban revoked for {user.mention}.",
+            actor=executor,
+            target=user,
+            reason=reason,
+            severity=LogSeverity.LOW,
         )
+
+        if executor:
+            await AntiNukeManager.record_and_evaluate_infraction(
+                guild=guild,
+                executor=executor,
+                event_type=AntiNukeConstants.EVENT_BAN_REMOVE,
+                audit_entry_id=entry.id if entry else None,
+                details={"target_user": str(user), "target_id": str(user.id)},
+            )
 
     # 12. EMOJIS UPDATE
     @classmethod
@@ -480,7 +522,7 @@ class AntiNukeService:
             details={"rule_name": getattr(rule, "name", "AutoMod Rule")},
         )
 
-    # 21. AUDIT LOG ENTRY CREATE
+    # 21. AUDIT LOG ENTRY PROCESSING (Internal Attribution & Evidence)
     @classmethod
     async def on_audit_log_entry_create(cls, entry: discord.AuditLogEntry) -> None:
         guild = getattr(entry, "guild", None)
@@ -490,14 +532,13 @@ class AntiNukeService:
         if not entry.user or (guild.me and entry.user.id == guild.me.id):
             return
 
-        # Monitor high risk audit actions through the unified rate limiter
-        await AntiNukeManager.record_and_evaluate_infraction(
-            guild=guild,
-            executor=entry.user,
-            event_type=AntiNukeConstants.EVENT_AUDIT_LOG_CREATE,
-            audit_entry_id=entry.id,
-            details={"audit_action": str(entry.action)},
-        )
+        # Deduplicate audit log entries to prevent duplicate processing
+        if entry.id in AntiNukeManager._processed_audit_entries:
+            return
+        AntiNukeManager._processed_audit_entries.append(entry.id)
+
+        # Do NOT automatically punish an actor solely because an audit-log entry appeared.
+        # Instead, audit log entries serve as evidence and attribution for corresponding gateway events.
 
     # 22. SCHEDULED EVENT DELETE
     @classmethod

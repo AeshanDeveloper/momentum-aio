@@ -107,6 +107,33 @@ class AntiNukeConstants:
         EVENT_BOT_ADD,
     ]
 
+    # User-facing configurable events (removes the confusing generic audit log event from UI)
+    USER_CONFIGURABLE_EVENTS = [
+        EVENT_GUILD_UPDATE,
+        EVENT_CHANNEL_CREATE,
+        EVENT_CHANNEL_UPDATE,
+        EVENT_CHANNEL_DELETE,
+        EVENT_ROLE_CREATE,
+        EVENT_ROLE_UPDATE,
+        EVENT_ROLE_DELETE,
+        EVENT_MEMBER_UPDATE,
+        EVENT_MEMBER_REMOVE,
+        EVENT_BAN_ADD,
+        EVENT_BAN_REMOVE,
+        EVENT_EMOJIS_UPDATE,
+        EVENT_STICKERS_UPDATE,
+        EVENT_WEBHOOKS_UPDATE,
+        EVENT_INVITE_CREATE,
+        EVENT_INVITE_DELETE,
+        EVENT_INTEGRATIONS_UPDATE,
+        EVENT_AUTOMOD_CREATE,
+        EVENT_AUTOMOD_UPDATE,
+        EVENT_AUTOMOD_DELETE,
+        EVENT_SCHEDULED_EVENT_DELETE,
+        EVENT_THREAD_DELETE,
+        EVENT_BOT_ADD,
+    ]
+
     # Category and Severity Metadata
     EVENT_METADATA: Dict[str, Dict[str, str]] = {
         EVENT_GUILD_UPDATE: {"category": "server", "severity": "high"},
@@ -957,35 +984,22 @@ class AntiNukeManager:
             .build()
         )
 
-        if webhook_url:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    payload = {
-                        "username": f"{settings.BOT_NAME} Security Sentinel",
-                        "avatar_url": str(guild.me.display_avatar.url) if (guild.me and hasattr(guild.me, "display_avatar")) else None,
-                        "embeds": [
-                            {
-                                "title": alert_title,
-                                "description": f"{alert_body}\n\n**Recommended Staff Action:**\n{recommendation}",
-                                "color": int(COLORS.get("error", "#B21F1F").replace("#", ""), 16),
-                                "footer": {"text": f"{settings.BOT_NAME} Security Platform • Webhook Log"},
-                                "timestamp": discord.utils.utcnow().isoformat(),
-                            }
-                        ]
-                    }
-                    async with session.post(webhook_url, json=payload, timeout=5) as resp:
-                        if resp.status in (200, 204):
-                            return
-            except Exception as w_err:
-                logger.warning(f"[AntiNuke] Webhook logging failed: {w_err}")
-
-        if warning_channel_id:
-            ch = guild.get_channel(int(warning_channel_id))
-            if ch and hasattr(ch, "send"):
-                try:
-                    await ch.send(view=container)
-                except Exception as ch_err:
-                    logger.error(f"[AntiNuke] Failed to send alert message to channel {warning_channel_id}: {ch_err}")
+        from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
+        await UnifiedWebhookLogger.dispatch_log(
+            guild=guild,
+            category=LogCategory.SECURITY,
+            title=alert_title,
+            description="Unauthorized structural or moderation operation intercepted and blocked by Anti-Nuke.",
+            actor=executor,
+            reason=f"Burst rate threshold exceeded for {friendly_event} ({count} in {window}s). Sanction: {punishment.upper()}",
+            fields=[
+                {"name": "Triggered Event", "value": friendly_event, "inline": True},
+                {"name": "Burst Rate", "value": f"`{count}` action(s) / `{window}s`", "inline": True},
+                {"name": "Enforced Punishment", "value": f"**`{punishment.upper()}`**", "inline": True},
+                {"name": "Recommended Staff Action", "value": recommendation, "inline": False},
+            ],
+            severity=LogSeverity.CRITICAL if punishment == AntiNukeConstants.PUNISH_BAN else LogSeverity.HIGH,
+        )
 
     @classmethod
     def get_registered_events_diagnostics(cls) -> Dict[str, Any]:
