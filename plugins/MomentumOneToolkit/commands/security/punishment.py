@@ -38,21 +38,21 @@ async def build_punishment_panel_view(guild: discord.Guild, selected_event: Opti
     punishments = cfg.get("punishments", {})
     defaults = get_default_punishments(mode)
 
-    if not selected_event or selected_event not in AntiNukeConstants.ALL_EVENTS:
+    if not selected_event or selected_event not in AntiNukeConstants.USER_CONFIGURABLE_EVENTS:
         selected_event = AntiNukeConstants.EVENT_CHANNEL_DELETE
 
     current_action = punishments.get(selected_event) or defaults.get(selected_event, AntiNukeConstants.PUNISH_BAN)
     friendly_selected = AntiNukeConstants.get_event_display_name(selected_event)
     event_desc = AntiNukeConstants.get_event_description(selected_event)
 
-    # 1. Monitored Events String Select Menu (24 events)
+    # 1. Monitored Events String Select Menu (23 configurable events)
     sel = (
         SelectMenuBuilder()
         .set_custom_id(f"an_pn:pick_event:{guild.id}")
         .set_placeholder("Select monitored security vector to configure...")
     )
 
-    for ev in AntiNukeConstants.ALL_EVENTS[:25]:
+    for ev in AntiNukeConstants.USER_CONFIGURABLE_EVENTS:
         friendly_name = AntiNukeConstants.get_event_display_name(ev)
         act = punishments.get(ev) or defaults.get(ev, "ban")
         sel.add_option(

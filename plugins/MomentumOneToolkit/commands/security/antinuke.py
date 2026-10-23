@@ -37,7 +37,7 @@ def get_staged_events(guild_id: str | int) -> Set[str]:
     gid = str(guild_id)
     if gid not in _EVENT_MANAGER_STAGING:
         cfg = AntiNukeManager.get_guild_config(gid)
-        _EVENT_MANAGER_STAGING[gid] = set(cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS))
+        _EVENT_MANAGER_STAGING[gid] = set(cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS))
     return _EVENT_MANAGER_STAGING[gid]
 
 
@@ -63,7 +63,7 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
         mode = AntiNukeConstants.MODE_HARD
 
     mode_display = AntiNukeManager.get_mode_display_name(mode)
-    monitored_events = cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    monitored_events = cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
     log_ch_id = cfg.get("log_channel_id")
     log_ch_str = f"<#{log_ch_id}>" if log_ch_id else "*Not Configured*"
     warn_ch_id = cfg.get("warning_channel_id")
@@ -81,7 +81,7 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
     summary_text = (
         f"{status_line}\n\n"
         f"• **Active Security Mode:** `{mode_display}`\n"
-        f"• **Enabled Monitored Events:** `{len(monitored_events)} / {len(AntiNukeConstants.ALL_EVENTS)}` vectors\n"
+        f"• **Enabled Monitored Events:** `{len(monitored_events)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)}` vectors\n"
         f"• **Incident Forensics Log:** {log_ch_str}\n"
         f"• **Security Warning Channel:** {warn_ch_str}\n\n"
         f"Use the **Manage Settings** menu below to navigate focused configuration panels."
@@ -200,7 +200,7 @@ async def build_overview_panel(guild: discord.Guild) -> Any:
     """Panel: Anti-Nuke Overview."""
     cfg = AntiNukeManager.get_guild_config(str(guild.id))
     mode = cfg.get("mode", AntiNukeConstants.MODE_HARD)
-    monitored = cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    monitored = cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
     eos = cfg.get("extra_owners", [])
     wls = cfg.get("whitelists", {})
     tbs = cfg.get("ticket_bots", [])
@@ -212,7 +212,7 @@ async def build_overview_panel(guild: discord.Guild) -> Any:
         f"• **Setup Status:** `{'Completed' if cfg.get('setup_completed') else 'Incomplete'}`\n"
         f"• **Defense State:** `{'Active' if cfg.get('enabled') else 'Paused'}`\n"
         f"• **Operating Mode:** `{AntiNukeManager.get_mode_display_name(mode)}`\n"
-        f"• **Monitored Vectors:** `{len(monitored)} / {len(AntiNukeConstants.ALL_EVENTS)}` events\n"
+        f"• **Monitored Vectors:** `{len(monitored)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)}` events\n"
         f"• **Warning Channel:** {f'<#{warn_ch}>' if warn_ch else '*Not Set*'}\n"
         f"• **Forensics Log Channel:** {f'<#{log_ch}>' if log_ch else '*Not Set*'}\n"
         f"• **Extra Owners:** `{len(eos)}` users\n"
@@ -327,10 +327,10 @@ async def build_event_manager_panel(guild: discord.Guild, staged_events: Optiona
         .set_custom_id(f"an:ev_menu:{guild.id}")
         .set_placeholder("Select events to monitor (multi-selection supported)...")
         .set_min_values(1)
-        .set_max_values(min(24, len(AntiNukeConstants.ALL_EVENTS)))
+        .set_max_values(min(25, len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)))
     )
 
-    for ev in AntiNukeConstants.ALL_EVENTS:
+    for ev in AntiNukeConstants.USER_CONFIGURABLE_EVENTS:
         name = AntiNukeConstants.get_event_display_name(ev)
         desc = AntiNukeConstants.get_event_description(ev)
         event_select.add_option(
@@ -340,14 +340,14 @@ async def build_event_manager_panel(guild: discord.Guild, staged_events: Optiona
             default=(ev in staged_events)
         )
 
-    is_all = (len(staged_events) >= len(AntiNukeConstants.ALL_EVENTS))
+    is_all = (len(staged_events) >= len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS))
 
     action_row_quick = (
         ActionRowBuilder()
         .add_button(
             ButtonBuilder()
             .set_custom_id(f"an:ev_select_all:{guild.id}")
-            .set_label("Select All 24 Events")
+            .set_label(f"Select All {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)} Events")
             .set_style(ButtonStyle.Success if is_all else ButtonStyle.Primary)
             .set_emoji(EMOJIS.get("check", "✅"))
         )
@@ -380,7 +380,7 @@ async def build_event_manager_panel(guild: discord.Guild, staged_events: Optiona
 
     desc = (
         f"Configure which gateway events are monitored in real-time.\n\n"
-        f"• **Currently Selected:** **{len(staged_events)} / {len(AntiNukeConstants.ALL_EVENTS)} events**\n"
+        f"• **Currently Selected:** **{len(staged_events)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)} events**\n"
         f"• **Enforcement Notice:** Disabled events will be ignored by anti-nuke monitors.\n\n"
         f"-# *Select the desired events from the menu, then click **Save Event Configuration** to persist.*"
     )

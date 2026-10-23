@@ -105,7 +105,7 @@ async def build_threshold_overview_view(guild: discord.Guild, selected_event: Op
         .set_custom_id(f"an_th:pick_event:{guild.id}")
         .set_placeholder("Select an event vector to adjust threshold...")
     )
-    for ev in AntiNukeConstants.ALL_EVENTS:
+    for ev in AntiNukeConstants.USER_CONFIGURABLE_EVENTS:
         ev_friendly = AntiNukeConstants.get_event_display_name(ev)
         ev_th = current_thresholds.get(ev, {"count": 1, "window": 60})
         cnt = ev_th.get("count", 1)
@@ -148,27 +148,34 @@ async def build_threshold_overview_view(guild: discord.Guild, selected_event: Op
             .set_emoji(EMOJIS.get("check" if is_cur else "clock", "⏱️"))
         )
 
-    # 4. Save, Reset & Navigation Buttons
+    # 4. Save, Reset, Cancel & Navigation Buttons
     nav_row = (
         ActionRowBuilder()
         .add_button(
             ButtonBuilder()
             .set_custom_id(f"an_th:save:{canonical_active}:{guild.id}")
-            .set_label(f"Save {friendly_active_name} Threshold")
+            .set_label(f"Save {friendly_active_name}")
             .set_style(ButtonStyle.Success)
             .set_emoji(EMOJIS.get("check", "✅"))
         )
         .add_button(
             ButtonBuilder()
             .set_custom_id(f"an_th:reset:{canonical_active}:{guild.id}")
-            .set_label("Reset to Mode Defaults")
+            .set_label("Reset to Defaults")
             .set_style(ButtonStyle.Secondary)
             .set_emoji(EMOJIS.get("refresh", "🔄"))
         )
         .add_button(
             ButtonBuilder()
+            .set_custom_id(f"an_th:cancel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+        .add_button(
+            ButtonBuilder()
             .set_custom_id(f"an:dashboard:{guild.id}")
-            .set_label("Back to Control Center")
+            .set_label("Back to Dashboard")
             .set_style(ButtonStyle.Secondary)
             .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
         )

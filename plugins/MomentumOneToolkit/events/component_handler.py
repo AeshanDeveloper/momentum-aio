@@ -124,6 +124,28 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 return
 
         # ----------------------------------------------------------------------
+        # Logging System Authority Enforcement
+        # ----------------------------------------------------------------------
+        if custom_id.startswith(("log_wiz:", "log_cfg:")):
+            if not guild:
+                return
+            m_perms = interaction.user.guild_permissions if hasattr(interaction.user, "guild_permissions") else None
+            is_admin = (m_perms and m_perms.manage_guild) or AntiNukeManager.is_owner_or_extra_owner(guild, interaction.user.id)
+            if not is_admin:
+                box = (
+                    ContainerBuilder()
+                    .set_accent_color(COLORS.get("error", "#B21F1F"))
+                    .add_text_display(f"### {EMOJIS.get('denied', '🔒')} Access Denied")
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_text_display(f"{EMOJIS.get('cross', '❌')} You must have `Manage Server` permission to configure logging.")
+                    .set_footer(f"{settings.BOT_NAME} Security Authority")
+                    .build()
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.send_message(view=box, ephemeral=True)
+                return
+
+        # ----------------------------------------------------------------------
         # 3. Setup Wizard Interactions (an_wiz:)
         # ----------------------------------------------------------------------
         if custom_id.startswith("an_wiz:"):
@@ -182,7 +204,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     await interaction.response.edit_message(view=view)
 
             elif sub_action == "events_all":
-                sess["monitored_events"] = list(AntiNukeConstants.ALL_EVENTS)
+                sess["monitored_events"] = list(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
                 sess["events_confirmed"] = True
                 view = await build_wizard_step3_view(guild)
                 if hasattr(interaction, "response") and not interaction.response.is_done():
@@ -363,7 +385,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 if not AntiNukeConstants.is_mode_enabled(mode):
                     mode = AntiNukeConstants.MODE_HARD
 
-                monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+                monitored = sess.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
                 thresholds = sess.get("thresholds") or get_default_thresholds(mode)
                 punishments = sess.get("punishments") or get_default_punishments(mode)
 
@@ -518,6 +540,15 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     v = await build_security_panel(guild)
                 elif panel_name == "events":
                     v = await build_event_manager_panel(guild)
+                elif panel_name in ["thresholds", "threshold"]:
+                    from plugins.MomentumOneToolkit.commands.security.thresholds import build_thresholds_dashboard_view
+                    v = await build_thresholds_dashboard_view(guild, user_id=interaction.user.id)
+                elif panel_name in ["punishments", "punishment"]:
+                    from plugins.MomentumOneToolkit.commands.security.punishment import build_punishment_panel_view
+                    v = await build_punishment_panel_view(guild)
+                elif panel_name in ["whitelist", "whitelists"]:
+                    from plugins.MomentumOneToolkit.commands.security.whitelist import build_whitelist_dashboard_view
+                    v = await build_whitelist_dashboard_view(guild)
                 elif panel_name == "channels":
                     v = await build_channels_panel(guild)
                 elif panel_name == "ticketbots":
@@ -548,7 +579,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     await interaction.response.edit_message(view=v)
 
             elif action == "ev_select_all":
-                all_evs = set(AntiNukeConstants.ALL_EVENTS)
+                all_evs = set(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
                 set_staged_events(guild.id, all_evs)
                 v = await build_event_manager_panel(guild, all_evs)
                 if hasattr(interaction, "response") and not interaction.response.is_done():
@@ -763,6 +794,11 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 view = await build_thresholds_dashboard_view(guild, user_id=interaction.user.id)
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=view)
+
+            elif th_action in ["cancel", "close", "back"]:
+                v = await build_dashboard_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
             return
 
         # ----------------------------------------------------------------------
@@ -1095,6 +1131,271 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 )
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=success_box)
+            return
+
+        # ----------------------------------------------------------------------
+        # 11. Logging Setup Wizard Interactions (log_wiz:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("log_wiz:"):
+            from plugins.MomentumOneToolkit.commands.general.logging import (
+                build_wizard_step1_view,
+                build_wizard_step2_view,
+                build_wizard_preview_view,
+                build_logging_panel_view,
+                get_or_create_logging_wizard_session,
+                clear_logging_wizard_session,
+            )
+            from core.logging.webhook_logger import UnifiedWebhookLogger
+
+            sess = get_or_create_logging_wizard_session(guild)
+            parts = custom_id.split(":")
+            wiz_action = parts[1] if len(parts) > 1 else ""
+
+            if wiz_action in ["start", "step1"]:
+                view = await build_wizard_step1_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif wiz_action == "set_mode":
+                mode = parts[2] if len(parts) > 2 else "category"
+                sess["mode"] = mode
+                view = await build_wizard_step1_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif wiz_action == "toggle_an":
+                sess["separate_antinuke"] = not sess.get("separate_antinuke", True)
+                view = await build_wizard_step1_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif wiz_action == "step2":
+                view = await build_wizard_step2_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif wiz_action == "set_layout":
+                layout = parts[2] if len(parts) > 2 else "category"
+                sess["layout"] = layout
+                view = await build_wizard_step2_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif wiz_action == "preview":
+                view = await build_wizard_preview_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif wiz_action == "confirm_execute":
+                res = await UnifiedWebhookLogger.create_logging_setup_workflow(
+                    guild=guild,
+                    layout=sess.get("layout", "category"),
+                    create_category=(sess.get("mode") == "category"),
+                    category_name=sess.get("category_name"),
+                    separate_antinuke=sess.get("separate_antinuke", True),
+                )
+                clear_logging_wizard_session(guild.id)
+
+                if res.get("success"):
+                    ch_count = len(res.get("channels", []))
+                    msg = (
+                        f"Logging system successfully deployed!\n\n"
+                        f"• Created `{ch_count}` dedicated private logging channels.\n"
+                        f"• Configured `{len(res.get('destinations', {}))}` webhook routes.\n"
+                        f"• Validated delivery endpoints and locked permissions."
+                    )
+                    c_style = "success"
+                else:
+                    msg = f"Setup encountered errors: {res.get('error', 'Failed to complete channel/webhook provisioning.')}"
+                    c_style = "error"
+
+                box = (
+                    ContainerBuilder()
+                    .set_accent_color(COLORS.get(c_style, "#3FD438"))
+                    .add_text_display(f"### {EMOJIS.get('check' if res.get('success') else 'cross', '✅')} Logging Setup Result")
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_text_display(msg)
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_action_row(
+                        ActionRowBuilder().add_button(
+                            ButtonBuilder()
+                            .set_custom_id(f"log_cfg:panel:{guild.id}")
+                            .set_label("Open Logging Panel")
+                            .set_style(ButtonStyle.Primary)
+                            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+                        )
+                    )
+                    .set_footer(f"{settings.BOT_NAME} Unified Logger")
+                    .build()
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=box)
+
+            elif wiz_action == "cancel":
+                clear_logging_wizard_session(guild.id)
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+            return
+
+        # ----------------------------------------------------------------------
+        # 12. Logging Control Panel Interactions (log_cfg:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("log_cfg:"):
+            from plugins.MomentumOneToolkit.commands.general.logging import (
+                build_logging_panel_view,
+                build_assign_channel_view,
+            )
+            from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory
+
+            parts = custom_id.split(":")
+            cfg_action = parts[1] if len(parts) > 1 else ""
+
+            if cfg_action in ["panel", "refresh"]:
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "toggle_active":
+                cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+                new_state = not cfg.get("enabled", False)
+                await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"enabled": new_state})
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "toggle_an":
+                cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+                new_state = not cfg.get("separate_antinuke", True)
+                await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"separate_antinuke": new_state})
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "toggle_cat":
+                target_cat = values[0] if values else None
+                if target_cat:
+                    cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+                    disabled = list(cfg.get("disabled_categories", []))
+                    if target_cat in disabled:
+                        disabled.remove(target_cat)
+                    else:
+                        disabled.append(target_cat)
+                    await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"disabled_categories": disabled})
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "create_one":
+                ch, wh, err = await UnifiedWebhookLogger.create_logging_channel_with_webhook(
+                    guild=guild,
+                    channel_name="server-logs",
+                    topic=f"{settings.BOT_NAME} Unified Audit & Server Logs",
+                )
+                if ch and wh:
+                    cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+                    dests = dict(cfg.get("destinations", {}))
+                    entry = {
+                        "channel_id": str(ch.id),
+                        "channel_name": ch.name,
+                        "webhook_id": str(wh.id),
+                        "webhook_url": wh.url,
+                    }
+                    dests["general"] = entry
+                    for c in [LogCategory.MODERATION, LogCategory.CHANNELS, LogCategory.ROLES, LogCategory.MEMBERS, LogCategory.SERVER, LogCategory.CONFIG]:
+                        if c not in dests:
+                            dests[c] = entry
+                    await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"destinations": dests, "enabled": True})
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "create_two":
+                ch1, wh1, _ = await UnifiedWebhookLogger.create_logging_channel_with_webhook(
+                    guild=guild,
+                    channel_name="moderation-logs",
+                    topic=f"{settings.BOT_NAME} Moderation & Member Audit Logs",
+                )
+                ch2, wh2, _ = await UnifiedWebhookLogger.create_logging_channel_with_webhook(
+                    guild=guild,
+                    channel_name="server-logs",
+                    topic=f"{settings.BOT_NAME} Server & Integration Logs",
+                )
+                if ch1 and ch2 and wh1 and wh2:
+                    cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+                    dests = dict(cfg.get("destinations", {}))
+                    mod_entry = {"channel_id": str(ch1.id), "channel_name": ch1.name, "webhook_id": str(wh1.id), "webhook_url": wh1.url}
+                    srv_entry = {"channel_id": str(ch2.id), "channel_name": ch2.name, "webhook_id": str(wh2.id), "webhook_url": wh2.url}
+                    dests[LogCategory.MODERATION] = mod_entry
+                    dests[LogCategory.MEMBERS] = mod_entry
+                    dests[LogCategory.CHANNELS] = srv_entry
+                    dests[LogCategory.ROLES] = srv_entry
+                    dests[LogCategory.SERVER] = srv_entry
+                    dests[LogCategory.CONFIG] = srv_entry
+                    dests["general"] = srv_entry
+                    await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"destinations": dests, "layout": "dual", "enabled": True})
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "test_webhooks":
+                cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+                dests = cfg.get("destinations", {})
+                ch_tested = set()
+                results = []
+                for cat, d in dests.items():
+                    if isinstance(d, dict) and d.get("channel_id") and d.get("channel_id") not in ch_tested:
+                        cid = d.get("channel_id")
+                        ch_tested.add(cid)
+                        ok, msg = await UnifiedWebhookLogger.test_webhook(guild, cid)
+                        results.append(f"• <#{cid}>: {'✅ Success' if ok else f'❌ Failed ({msg})'}")
+
+                summary_msg = "\n".join(results) if results else "No channel destinations configured to test."
+                box = (
+                    ContainerBuilder()
+                    .set_accent_color(COLORS.get("info", "#0844C5"))
+                    .add_text_display(f"### {EMOJIS.get('rocket', '🚀')} Webhook Delivery Test Results")
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_text_display(summary_msg)
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_action_row(
+                        ActionRowBuilder().add_button(
+                            ButtonBuilder()
+                            .set_custom_id(f"log_cfg:panel:{guild.id}")
+                            .set_label("Back to Logging Panel")
+                            .set_style(ButtonStyle.Primary)
+                            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+                        )
+                    )
+                    .set_footer(f"{settings.BOT_NAME} Diagnostic Tester")
+                    .build()
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=box)
+
+            elif cfg_action == "repair_all":
+                cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+                dests = cfg.get("destinations", {})
+                repaired = 0
+                for d in dests.values():
+                    if isinstance(d, dict) and d.get("channel_id"):
+                        ok, _ = await UnifiedWebhookLogger.repair_webhook(guild, d.get("channel_id"))
+                        if ok:
+                            repaired += 1
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "do_assign":
+                cat = parts[2] if len(parts) > 2 else LogCategory.MODERATION
+                ch_id = values[0] if values else None
+                if ch_id:
+                    target_ch = guild.get_channel(int(ch_id))
+                    if isinstance(target_ch, discord.TextChannel):
+                        await UnifiedWebhookLogger.assign_category_channel(guild, cat, target_ch)
+                view = await build_logging_panel_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
             return
 
     except Exception as err:

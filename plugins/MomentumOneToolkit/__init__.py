@@ -12,7 +12,7 @@ from core.logging.logger import logger
 
 # Import commands
 from .commands import ping, help, ai
-from .commands.general import botinfo, server, profile, bug, notifications, update
+from .commands.general import botinfo, server, profile, bug, notifications, update, logging as logging_cmd
 from .commands.moderation import announce, channel, command_manage
 from .commands.security import (
     antinuke,
@@ -65,6 +65,7 @@ class Plugin(BasePlugin):
             bug,
             notifications,
             update,
+            logging_cmd,
             announce,
             channel,
             command_manage,

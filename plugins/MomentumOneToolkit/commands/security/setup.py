@@ -45,7 +45,7 @@ def get_or_create_wizard_session(guild: discord.Guild) -> Dict[str, Any]:
             "guild_id": gid,
             "mode": cur_mode,
             "mode_confirmed": False,
-            "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)),
+            "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)),
             "events_confirmed": False,
             "thresholds": dict(cfg.get("thresholds") or get_default_thresholds(cur_mode)),
             "threshold_active_event": AntiNukeConstants.EVENT_CHANNEL_DELETE,
@@ -362,7 +362,7 @@ async def build_wizard_step4_view(guild: discord.Guild) -> Any:
         .set_custom_id(f"an_wiz:th_pick_event:{guild.id}")
         .set_placeholder("Select event to adjust threshold...")
     )
-    monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    monitored = sess.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
     for ev in monitored[:25]:
         name = AntiNukeConstants.get_event_display_name(ev)
         th = thresholds.get(ev, {"count": 1, "window": 60})
@@ -473,7 +473,7 @@ async def build_wizard_step5_view(guild: discord.Guild) -> Any:
         .set_custom_id(f"an_wiz:pn_pick_event:{guild.id}")
         .set_placeholder("Select event to configure disciplinary action...")
     )
-    monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    monitored = sess.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
     for ev in monitored[:25]:
         name = AntiNukeConstants.get_event_display_name(ev)
         p = punishments.get(ev, "ban")
@@ -944,7 +944,7 @@ async def build_wizard_step11_view(guild: discord.Guild) -> Any:
     sess["step"] = 11
 
     mode = sess.get("mode", AntiNukeConstants.MODE_HARD)
-    monitored = sess.get("monitored_events", AntiNukeConstants.ALL_EVENTS)
+    monitored = sess.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
     warn_ch = sess.get("warning_channel_id")
     log_ch = sess.get("log_channel_id")
     tbs = sess.get("ticket_bots", [])
@@ -963,7 +963,7 @@ async def build_wizard_step11_view(guild: discord.Guild) -> Any:
     summary_text = (
         f"**Final Security Configuration Review:**\n\n"
         f"• **Operating Mode:** `{AntiNukeManager.get_mode_display_name(mode)}`\n"
-        f"• **Monitored Vectors:** `{len(monitored)} / {len(AntiNukeConstants.ALL_EVENTS)}` events\n"
+        f"• **Monitored Vectors:** `{len(monitored)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)}` events\n"
         f"• **Role Hierarchy Check:** {hierarchy_str}\n"
         f"• **Warning Channel:** {warn_str}\n"
         f"• **Log Channel:** {log_str}\n"
@@ -975,7 +975,7 @@ async def build_wizard_step11_view(guild: discord.Guild) -> Any:
     if can_activate:
         summary_text += f"{EMOJIS.get('check', '✅')} All required settings have been explicitly configured. Click **Confirm & Activate Anti-Nuke** to save permanently."
     else:
-        summary_text += f"{EMOJIS.get('cross', '❌')} Please navigate Back to configure required Warning and Log channels before activating."
+        summary_text += f"{EMOJIS.get('cross', '❌')} Both Warning and Log channels are strictly required before activation. Click below to configure the missing channels."
 
     action_row = ActionRowBuilder()
     if can_activate:
@@ -986,6 +986,23 @@ async def build_wizard_step11_view(guild: discord.Guild) -> Any:
             .set_style(ButtonStyle.Success)
             .set_emoji(EMOJIS.get("shield", "🛡️"))
         )
+    else:
+        if not warn_ch:
+            action_row.add_button(
+                ButtonBuilder()
+                .set_custom_id(f"an_wiz:step7:{guild.id}")
+                .set_label("Configure Warning Channel")
+                .set_style(ButtonStyle.Primary)
+                .set_emoji(EMOJIS.get("warning", "⚠️"))
+            )
+        if not log_ch:
+            action_row.add_button(
+                ButtonBuilder()
+                .set_custom_id(f"an_wiz:step8:{guild.id}")
+                .set_label("Configure Log Channel")
+                .set_style(ButtonStyle.Primary)
+                .set_emoji(EMOJIS.get("channel", "📁"))
+            )
     action_row.add_button(
         ButtonBuilder()
         .set_custom_id(f"an_wiz:step10:{guild.id}")
@@ -1053,7 +1070,7 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         "guild_id": gid,
         "mode": cur_mode,
         "mode_confirmed": False,
-        "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.ALL_EVENTS)),
+        "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)),
         "events_confirmed": False,
         "thresholds": dict(cfg.get("thresholds") or get_default_thresholds(cur_mode)),
         "threshold_active_event": AntiNukeConstants.EVENT_CHANNEL_DELETE,

@@ -9,6 +9,7 @@ from sdk.discord.response import send_response, send_ui
 from apps.bot.discord.permissions.permission import Permissions
 from apps.bot.discord.permissions.resolver import has_permission
 from shared.types.command_record import CommandType
+from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
 
 name = "channel"
 aliases = ["ch", "channelctl"]
@@ -166,6 +167,24 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
                         channel_id=target_channel.id
                     ),
                     variables={"channel_id": str(target_channel.id), "seconds": 0},
+            asyncio.create_task(
+                UnifiedWebhookLogger.dispatch_log(
+                    guild=guild,
+                    category=LogCategory.CHANNELS,
+                    title="Channel Slowmode Updated",
+                    description=f"Slowmode delay for {target_channel.mention} was adjusted.",
+                    actor=author,
+                    target=target_channel,
+                    reason=f"Set slowmode to {seconds}s",
+                    fields=[{"name": "Slowmode Seconds", "value": f"`{seconds}s`", "inline": True}],
+                    severity=LogSeverity.INFO,
+                )
+            )
+            if seconds == 0:
+                return await send_ui(
+                    message,
+                    "commands.channel.slowmode_disabled",
+                    variables={"channel_id": str(target_channel.id)},
                     style="success"
                 )
             else:
@@ -187,6 +206,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             if hasattr(overwrite, "send_messages_in_threads"):
                 overwrite.send_messages_in_threads = False
             await target_channel.set_permissions(guild.default_role, overwrite=overwrite, reason=reason)
+            asyncio.create_task(
+                UnifiedWebhookLogger.dispatch_log(
+                    guild=guild,
+                    category=LogCategory.CHANNELS,
+                    title="Channel Locked",
+                    description=f"{target_channel.mention} was locked (@everyone send permissions revoked).",
+                    actor=author,
+                    target=target_channel,
+                    reason=reason,
+                    severity=LogSeverity.MEDIUM,
+                )
+            )
             return await send_ui(
                 message,
                 "commands.channel.locked",
@@ -210,6 +241,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             if hasattr(overwrite, "send_messages_in_threads"):
                 overwrite.send_messages_in_threads = None
             await target_channel.set_permissions(guild.default_role, overwrite=overwrite, reason=reason)
+            asyncio.create_task(
+                UnifiedWebhookLogger.dispatch_log(
+                    guild=guild,
+                    category=LogCategory.CHANNELS,
+                    title="Channel Unlocked",
+                    description=f"{target_channel.mention} was unlocked (@everyone send permissions restored).",
+                    actor=author,
+                    target=target_channel,
+                    reason=reason,
+                    severity=LogSeverity.LOW,
+                )
+            )
             return await send_ui(
                 message,
                 "commands.channel.unlocked",
@@ -231,6 +274,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             overwrite = target_channel.overwrites_for(guild.default_role)
             overwrite.view_channel = False
             await target_channel.set_permissions(guild.default_role, overwrite=overwrite, reason=reason)
+            asyncio.create_task(
+                UnifiedWebhookLogger.dispatch_log(
+                    guild=guild,
+                    category=LogCategory.CHANNELS,
+                    title="Channel Hidden",
+                    description=f"{target_channel.mention} view permissions removed for @everyone.",
+                    actor=author,
+                    target=target_channel,
+                    reason=reason,
+                    severity=LogSeverity.MEDIUM,
+                )
+            )
             return await send_ui(
                 message,
                 "commands.channel.hidden",
@@ -247,6 +302,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
             overwrite = target_channel.overwrites_for(guild.default_role)
             overwrite.view_channel = None
             await target_channel.set_permissions(guild.default_role, overwrite=overwrite, reason=reason)
+            asyncio.create_task(
+                UnifiedWebhookLogger.dispatch_log(
+                    guild=guild,
+                    category=LogCategory.CHANNELS,
+                    title="Channel Unhidden",
+                    description=f"{target_channel.mention} view permissions restored for @everyone.",
+                    actor=author,
+                    target=target_channel,
+                    reason=reason,
+                    severity=LogSeverity.LOW,
+                )
+            )
             return await send_ui(
                 message,
                 "commands.channel.unhidden",
@@ -261,6 +328,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         ch_name = getattr(target_channel, "name", "channel")
         target_is_current = (target_channel.id == message.channel.id)
         try:
+            asyncio.create_task(
+                UnifiedWebhookLogger.dispatch_log(
+                    guild=guild,
+                    category=LogCategory.CHANNELS,
+                    title="Channel Deleted",
+                    description=f"Channel `#{ch_name}` (`{target_channel.id}`) was permanently deleted.",
+                    actor=author,
+                    target=f"#{ch_name} ({target_channel.id})",
+                    reason=f"Deleted by {author}",
+                    severity=LogSeverity.HIGH,
+                )
+            )
             await target_channel.delete(reason=f"Channel deleted by {author}")
             if not target_is_current:
                 return await send_ui(
@@ -294,6 +373,18 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
                 pass
 
             await target_channel.delete(reason=f"Channel nuke by {author}")
+            asyncio.create_task(
+                UnifiedWebhookLogger.dispatch_log(
+                    guild=guild,
+                    category=LogCategory.CHANNELS,
+                    title="Channel Nuked & Recreated",
+                    description=f"Channel `#{old_name}` was nuked and cloned into {new_channel.mention}.",
+                    actor=author,
+                    target=new_channel,
+                    reason=f"Nuked by {author}",
+                    severity=LogSeverity.HIGH,
+                )
+            )
 
             # Send nuke container into the newly created channel
             return await send_ui(

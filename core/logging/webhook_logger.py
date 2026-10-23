@@ -520,3 +520,153 @@ class UnifiedWebhookLogger:
                         return False, f"Discord Webhook API returned HTTP {resp.status}: {resp_text[:120]}"
         except Exception as err:
             return False, f"Network or execution error: {err}"
+
+    @classmethod
+    def mask_webhook_url(cls, webhook_url: Optional[str]) -> str:
+        """Securely masks the webhook token so secrets are never printed in UI or logs."""
+        if not webhook_url or not isinstance(webhook_url, str):
+            return "*No Webhook Configured*"
+        parts = webhook_url.rstrip("/").split("/")
+        if len(parts) >= 2:
+            wh_id = parts[-2]
+            return f"`https://discord.com/api/webhooks/{wh_id}/••••••••`"
+        return "`https://discord.com/api/webhooks/••••/••••`"
+
+    @classmethod
+    async def assign_category_channel(
+        cls, guild: discord.Guild, category: str, channel: discord.TextChannel
+    ) -> Tuple[bool, str]:
+        """Assigns a log category to a specified text channel and creates/links a webhook."""
+        wh_url = await cls.get_or_create_channel_webhook(channel)
+        if not wh_url:
+            return False, f"Failed to acquire or create webhook in <#{channel.id}>. Verify `Manage Webhooks` permission."
+
+        cfg = cls.get_guild_logging_config(str(guild.id))
+        destinations = dict(cfg.get("destinations", {}))
+        destinations[category] = {
+            "channel_id": str(channel.id),
+            "channel_name": channel.name,
+            "webhook_url": wh_url,
+        }
+        await cls.save_guild_logging_config(str(guild.id), {"destinations": destinations, "enabled": True})
+        return True, f"Category **{category.title()}** successfully mapped to <#{channel.id}> via webhook."
+
+    @classmethod
+    async def create_logging_setup_workflow(
+        cls,
+        guild: discord.Guild,
+        layout: str,
+        create_category: bool = True,
+        category_name: Optional[str] = None,
+        separate_antinuke: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Executes an end-to-end atomic logging setup workflow.
+        Creates category (if requested), creates configured channels, creates webhooks,
+        and persistently maps categories to destinations.
+        """
+        me = guild.me
+        if not me or not me.guild_permissions.manage_channels:
+            return {"success": False, "error": "Bot is missing `Manage Channels` permission."}
+        if not me.guild_permissions.manage_webhooks:
+            return {"success": False, "error": "Bot is missing `Manage Webhooks` permission."}
+
+        target_cat: Optional[discord.CategoryChannel] = None
+        if create_category:
+            cat_label = category_name or f"{settings.BOT_NAME.upper()} LOGS"
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
+                me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_webhooks=True),
+            }
+            try:
+                target_cat = await guild.create_category(
+                    name=cat_label,
+                    overwrites=overwrites,
+                    reason="MomentumOne Unified Webhook Logging Category Setup",
+                )
+            except Exception as err:
+                return {"success": False, "error": f"Failed to create category: {err}"}
+
+        created_channels = []
+        created_destinations = {}
+        errors = []
+
+        # Define channel specs per layout
+        # Each spec: (ch_name, [categories], topic)
+        specs = []
+        if layout == "compact":
+            general_cats = [
+                LogCategory.MODERATION,
+                LogCategory.CHANNELS,
+                LogCategory.ROLES,
+                LogCategory.MEMBERS,
+                LogCategory.SERVER,
+                LogCategory.CONFIG,
+            ]
+            if not separate_antinuke:
+                general_cats.append(LogCategory.SECURITY)
+            specs.append(("server-logs", general_cats, "Centralized Server & Audit Logs"))
+            if separate_antinuke:
+                specs.append(("security-logs", [LogCategory.SECURITY], "Anti-Nuke & Security Incident Logs"))
+
+        elif layout == "dual":
+            specs.append(("moderation-logs", [LogCategory.MODERATION, LogCategory.MEMBERS], "Moderation & Member Actions"))
+            specs.append(("server-logs", [LogCategory.CHANNELS, LogCategory.ROLES, LogCategory.SERVER, LogCategory.CONFIG], "Server Operations & Configuration"))
+            if separate_antinuke:
+                specs.append(("security-logs", [LogCategory.SECURITY], "Anti-Nuke & Security Incident Logs"))
+
+        elif layout == "category":
+            specs.append(("security-logs", [LogCategory.SECURITY], "Anti-Nuke & Security Incident Alerts"))
+            specs.append(("moderation-logs", [LogCategory.MODERATION], "Server Moderation Logs"))
+            specs.append(("channel-logs", [LogCategory.CHANNELS], "Channel Creations, Deletions, and Overwrite Updates"))
+            specs.append(("role-logs", [LogCategory.ROLES], "Role Changes, Creations, and Permission Audits"))
+            specs.append(("member-logs", [LogCategory.MEMBERS], "Member Joins, Leaves, and Moderation Updates"))
+            specs.append(("server-logs", [LogCategory.SERVER, LogCategory.CONFIG], "Integrations, Invites, Emojis, and Configuration"))
+
+        else:  # advanced / default
+            specs.append(("security-logs", [LogCategory.SECURITY], "Security Logs"))
+            specs.append(("moderation-logs", [LogCategory.MODERATION, LogCategory.MEMBERS], "Moderation Logs"))
+            specs.append(("server-logs", [LogCategory.CHANNELS, LogCategory.ROLES, LogCategory.SERVER, LogCategory.CONFIG], "Server Logs"))
+
+        for ch_name, cats, topic in specs:
+            ch, wh, err = await cls.create_logging_channel_with_webhook(
+                guild=guild,
+                channel_name=ch_name,
+                category=target_cat,
+                topic=topic,
+            )
+            if ch and wh:
+                created_channels.append(ch)
+                for cat in cats:
+                    created_destinations[cat] = {
+                        "channel_id": str(ch.id),
+                        "channel_name": ch.name,
+                        "webhook_id": str(wh.id),
+                        "webhook_url": wh.url,
+                    }
+                created_destinations["general"] = {
+                    "channel_id": str(ch.id),
+                    "channel_name": ch.name,
+                    "webhook_id": str(wh.id),
+                    "webhook_url": wh.url,
+                }
+            else:
+                errors.append(f"Channel `{ch_name}`: {err}")
+
+        # Persist to database
+        cfg_updates = {
+            "enabled": True,
+            "layout": layout,
+            "category_id": str(target_cat.id) if target_cat else None,
+            "separate_antinuke": separate_antinuke,
+            "destinations": created_destinations,
+        }
+        await cls.save_guild_logging_config(str(guild.id), cfg_updates)
+
+        return {
+            "success": len(created_channels) > 0,
+            "category": target_cat,
+            "channels": created_channels,
+            "destinations": created_destinations,
+            "errors": errors,
+        }

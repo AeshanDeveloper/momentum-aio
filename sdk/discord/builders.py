@@ -378,9 +378,28 @@ class ComponentLayoutView(discord.ui.LayoutView):
     def __init__(self, timeout: Optional[float] = 180.0):
         super().__init__(timeout=timeout)
         self._collector: Optional[ComponentCollector] = None
+        self._custom_children: List[Any] = []
+
+    @property
+    def children(self) -> List[Any]:
+        if hasattr(self, "_children"):
+            return self._children
+        return self._custom_children
+
+    @children.setter
+    def children(self, value: Any) -> None:
+        if hasattr(self, "_children"):
+            self._children = list(value)
+        self._custom_children = list(value)
 
     def add_item(self, item: Any) -> ComponentLayoutView:
-        super().add_item(item)
+        try:
+            super().add_item(item)
+        except Exception:
+            if hasattr(self, "_children") and item not in self._children:
+                self._children.append(item)
+            elif item not in self._custom_children:
+                self._custom_children.append(item)
         if self._collector:
             self._collector._rewire_all()
         return self
