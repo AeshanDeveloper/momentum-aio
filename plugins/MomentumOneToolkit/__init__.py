@@ -42,6 +42,7 @@ from .commands.dev import (
 # Import events
 from .events import prefix_handler, slash_handler, component_handler
 from .events.antinuke import ALL_ANTINUKE_EVENT_MODULES
+from .events.logging import ALL_LOGGING_EVENT_MODULES
 
 class Plugin(BasePlugin):
     """
@@ -129,14 +130,26 @@ class Plugin(BasePlugin):
             evt = Event(
                 name=getattr(an_ev, "name"),
                 execute=getattr(an_ev, "execute"),
-                description=getattr(an_ev, "description", "")
+                description=getattr(an_ev, "description", ""),
+                category="antinuke"
+            )
+            events_registry.register(evt)
+
+        # Register dedicated logging event listeners
+        for log_ev in ALL_LOGGING_EVENT_MODULES:
+            evt = Event(
+                name=getattr(log_ev, "name"),
+                execute=getattr(log_ev, "execute"),
+                description=getattr(log_ev, "description", ""),
+                category="logging"
             )
             events_registry.register(evt)
 
         logger.info(
             f"[{self.plugin_id}] Startup diagnostics: {len(command_modules)} commands registered. "
             f"{len(events_registry.list_all())} total event listeners active "
-            f"({len(ALL_ANTINUKE_EVENT_MODULES)}/24 Anti-Nuke gateway vectors successfully registered)."
+            f"({len(ALL_ANTINUKE_EVENT_MODULES)}/24 Anti-Nuke gateway vectors, "
+            f"{len(ALL_LOGGING_EVENT_MODULES)} dedicated logging listeners successfully registered)."
         )
 
     async def on_ready(self) -> None:

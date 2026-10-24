@@ -1,6 +1,7 @@
 import time
 import asyncio
-from typing import Dict, Any, List, Optional, Tuple, Union
+import re
+from typing import Dict, Any, List, Optional, Tuple, Union, Callable, Awaitable
 try:
     import aiohttp
 except ImportError:
@@ -11,6 +12,37 @@ from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from core.logging.logger import logger
 from database.database import database
+
+_WEBHOOK_URL_REGEX = re.compile(r"https?://(?:[a-zA-Z0-9-]+\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+", re.IGNORECASE)
+_WEBHOOK_TOKEN_REGEX = re.compile(r"(/api/webhooks/\d+/)[A-Za-z0-9_-]+", re.IGNORECASE)
+
+def redact_webhook_credentials(text: Any) -> str:
+    """Removes all webhook URLs, tokens, and secrets from text, logs, and errors."""
+    if text is None:
+        return ""
+    s = str(text)
+    s = _WEBHOOK_URL_REGEX.sub("[REDACTED_WEBHOOK_URL]", s)
+    s = _WEBHOOK_TOKEN_REGEX.sub(r"\1[REDACTED_TOKEN]", s)
+    return s
+
+def get_webhook_display_status(guild: Optional[discord.Guild], dest: Optional[Dict[str, Any]]) -> str:
+    """
+    Returns only the user-facing status string: 'Configured', 'Missing', or 'Needs Repair'.
+    Never outputs URLs, tokens, or sensitive IDs.
+    """
+    if not dest or not isinstance(dest, dict):
+        return "Missing"
+    cid = dest.get("channel_id")
+    wh_url = dest.get("webhook_url")
+    if not cid:
+        return "Missing"
+    if guild:
+        ch = guild.get_channel(int(cid))
+        if not ch or not isinstance(ch, discord.TextChannel):
+            return "Needs Repair"
+    if not wh_url:
+        return "Needs Repair"
+    return "Configured"
 
 
 class LogCategory:
@@ -60,6 +92,79 @@ class UnifiedWebhookLogger:
     _configs_cache: Dict[str, Dict[str, Any]] = {}
     _webhook_cache: Dict[Tuple[str, str], str] = {}  # (guild_id, channel_id) -> webhook_url
     _initialized: bool = False
+    _ACTIVE_SETUP_SERVERS: set = set()
+    _SETUP_LOCK: asyncio.Lock = asyncio.Lock()
+    _PROCESSED_AUDIT_LOG_IDS: Dict[int, float] = {}
+    _OPERATION_DELAY: float = 1.0
+
+    @classmethod
+    async def acquire_setup_lock(cls, guild_id: str | int) -> bool:
+        """Acquires single-setup lock per guild to prevent duplicate concurrent workflows."""
+        gid = str(guild_id)
+        async with cls._SETUP_LOCK:
+            if gid in cls._ACTIVE_SETUP_SERVERS:
+                return False
+            cls._ACTIVE_SETUP_SERVERS.add(gid)
+            return True
+
+    @classmethod
+    async def release_setup_lock(cls, guild_id: str | int) -> None:
+        """Releases the setup lock for a guild."""
+        gid = str(guild_id)
+        async with cls._SETUP_LOCK:
+            cls._ACTIVE_SETUP_SERVERS.discard(gid)
+
+    @classmethod
+    def is_setup_in_progress(cls, guild_id: str | int) -> bool:
+        """Checks if a setup workflow is active for the specified guild."""
+        return str(guild_id) in cls._ACTIVE_SETUP_SERVERS
+
+    @classmethod
+    async def fetch_audit_attribution(
+        cls,
+        guild: discord.Guild,
+        action: discord.AuditLogAction,
+        target_id: Optional[Union[int, str]] = None,
+        max_age_seconds: float = 8.0,
+    ) -> Tuple[Optional[Union[discord.Member, discord.User]], Optional[str]]:
+        """
+        Retrieves responsible actor and reason from Discord audit log.
+        Deduplicates entries so identical audit log events are not reported multiple times.
+        """
+        if not guild:
+            return None, None
+        me = getattr(guild, "me", None)
+        if not me or not getattr(me.guild_permissions, "view_audit_log", False):
+            return None, None
+
+        now = time.time()
+        # Clean expired audit ids (> 60s)
+        expired = [eid for eid, exp in cls._PROCESSED_AUDIT_LOG_IDS.items() if now > exp]
+        for eid in expired:
+            cls._PROCESSED_AUDIT_LOG_IDS.pop(eid, None)
+
+        try:
+            async for entry in guild.audit_logs(action=action, limit=5):
+                entry_age = now - entry.created_at.timestamp()
+                if entry_age > max_age_seconds:
+                    break
+                if target_id is not None:
+                    target_match = False
+                    if entry.target and hasattr(entry.target, "id"):
+                        target_match = (str(entry.target.id) == str(target_id))
+                    if not target_match:
+                        continue
+
+                # Check if already processed
+                if entry.id in cls._PROCESSED_AUDIT_LOG_IDS:
+                    return None, None
+
+                cls._PROCESSED_AUDIT_LOG_IDS[entry.id] = now + 60.0
+                return entry.user, entry.reason
+        except Exception as err:
+            logger.debug(f"[UnifiedWebhookLogger] Audit log lookup exception on guild {guild.id}: {err}")
+
+        return None, None
 
     @classmethod
     async def initialize(cls) -> None:
@@ -365,7 +470,7 @@ class UnifiedWebhookLogger:
                         return True
                     else:
                         resp_text = await resp.text()
-                        err_msg = f"HTTP {resp.status}: {resp_text[:100]}"
+                        err_msg = redact_webhook_credentials(f"HTTP {resp.status}: {resp_text[:100]}")
                         cls._record_delivery_failure(guild.id, category, ch_id, err_msg)
                         logger.warning(f"[UnifiedWebhookLogger] Webhook delivery failed on guild {guild.id}: {err_msg}")
                         # Invalidate cached webhook on 404 / 401
@@ -373,8 +478,9 @@ class UnifiedWebhookLogger:
                             cls._webhook_cache.pop((str(guild.id), str(ch_id)), None)
                         return False
         except Exception as err:
-            cls._record_delivery_failure(guild.id, category, ch_id, str(err))
-            logger.error(f"[UnifiedWebhookLogger] Webhook exception on guild {guild.id}: {err}")
+            err_str = redact_webhook_credentials(str(err))
+            cls._record_delivery_failure(guild.id, category, ch_id, err_str)
+            logger.error(f"[UnifiedWebhookLogger] Webhook exception on guild {guild.id}: {err_str}")
             return False
 
     @classmethod
@@ -387,7 +493,7 @@ class UnifiedWebhookLogger:
             "timestamp": time.time(),
             "category": category,
             "channel_id": str(channel_id) if channel_id else "unknown",
-            "error": str(error),
+            "error": redact_webhook_credentials(error),
         }
         failures.append(record)
         # Keep only the latest 20 failure logs
@@ -480,7 +586,7 @@ class UnifiedWebhookLogger:
 
     @classmethod
     async def test_webhook(cls, guild: discord.Guild, channel_id: int | str) -> Tuple[bool, str]:
-        """Dispatches an explicit test embed to verify webhook connectivity."""
+        """Dispatches an explicit test embed to verify webhook connectivity without revealing secrets."""
         ch = guild.get_channel(int(channel_id))
         if not ch or not isinstance(ch, discord.TextChannel):
             return False, "Target channel not found."
@@ -493,7 +599,7 @@ class UnifiedWebhookLogger:
             guild=guild,
             category=LogCategory.CONFIG,
             title="Webhook Delivery Test",
-            description="This is an automated verification test confirming that Discord webhook log delivery is fully functional.",
+            description="Automated verification test confirming that Discord webhook log delivery is active and operational.",
             actor=guild.me,
             fields=[
                 {"name": "Channel", "value": f"<#{channel_id}> (`{channel_id}`)", "inline": True},
@@ -517,20 +623,17 @@ class UnifiedWebhookLogger:
                         return True, "Test webhook payload delivered successfully!"
                     else:
                         resp_text = await resp.text()
-                        return False, f"Discord Webhook API returned HTTP {resp.status}: {resp_text[:120]}"
+                        sanitized = redact_webhook_credentials(resp_text[:120])
+                        return False, f"Discord Webhook API returned HTTP {resp.status}: {sanitized}"
         except Exception as err:
-            return False, f"Network or execution error: {err}"
+            return False, f"Network or execution error: {redact_webhook_credentials(str(err))}"
 
     @classmethod
     def mask_webhook_url(cls, webhook_url: Optional[str]) -> str:
-        """Securely masks the webhook token so secrets are never printed in UI or logs."""
+        """Deprecated: Replaced by status badge. Never prints URLs or tokens."""
         if not webhook_url or not isinstance(webhook_url, str):
-            return "*No Webhook Configured*"
-        parts = webhook_url.rstrip("/").split("/")
-        if len(parts) >= 2:
-            wh_id = parts[-2]
-            return f"`https://discord.com/api/webhooks/{wh_id}/••••••••`"
-        return "`https://discord.com/api/webhooks/••••/••••`"
+            return "Missing"
+        return "Configured"
 
     @classmethod
     async def assign_category_channel(
@@ -559,40 +662,95 @@ class UnifiedWebhookLogger:
         create_category: bool = True,
         category_name: Optional[str] = None,
         separate_antinuke: bool = True,
+        progress_callback: Optional[Callable[[str], Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Executes an end-to-end atomic logging setup workflow.
-        Creates category (if requested), creates configured channels, creates webhooks,
-        and persistently maps categories to destinations.
+        Executes an idempotent, rate-limit protected logging setup workflow.
+        Reuses existing categories, channels, and webhooks without duplicating them.
         """
-        me = guild.me
-        if not me or not me.guild_permissions.manage_channels:
-            return {"success": False, "error": "Bot is missing `Manage Channels` permission."}
-        if not me.guild_permissions.manage_webhooks:
-            return {"success": False, "error": "Bot is missing `Manage Webhooks` permission."}
+        async def report(msg: str) -> None:
+            if progress_callback:
+                try:
+                    res = progress_callback(msg)
+                    if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                        await res
+                except Exception as err:
+                    logger.debug(f"[UnifiedWebhookLogger] Progress callback error: {err}")
 
+        await report("Preparing logging configuration…")
+
+        me = getattr(guild, "me", None)
+        if not me or not getattr(me.guild_permissions, "manage_channels", False):
+            return {"success": False, "error": "Bot is missing `Manage Channels` permission.", "step": "permissions"}
+        if not getattr(me.guild_permissions, "manage_webhooks", False):
+            return {"success": False, "error": "Bot is missing `Manage Webhooks` permission.", "step": "permissions"}
+
+        await report("Checking existing channels and categories…")
+        cfg = cls.get_guild_logging_config(str(guild.id))
+        existing_destinations = dict(cfg.get("destinations", {}))
+
+        # 1. Category Resolution & Reuse
         target_cat: Optional[discord.CategoryChannel] = None
+        created_category = False
+        reused_category = False
+        cat_label = category_name or f"{settings.BOT_NAME.upper()} LOGS"
+
         if create_category:
-            cat_label = category_name or f"{settings.BOT_NAME.upper()} LOGS"
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
-                me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_webhooks=True),
-            }
-            try:
-                target_cat = await guild.create_category(
-                    name=cat_label,
-                    overwrites=overwrites,
-                    reason="MomentumOne Unified Webhook Logging Category Setup",
-                )
-            except Exception as err:
-                return {"success": False, "error": f"Failed to create category: {err}"}
+            # Check previously configured category ID
+            saved_cat_id = cfg.get("category_id")
+            if saved_cat_id:
+                ch = guild.get_channel(int(saved_cat_id))
+                if isinstance(ch, discord.CategoryChannel):
+                    target_cat = ch
+                    reused_category = True
 
-        created_channels = []
-        created_destinations = {}
-        errors = []
+            # If not found by ID, inspect guild categories by name
+            if not target_cat:
+                for c in guild.categories:
+                    if c.name.strip().lower() == cat_label.strip().lower():
+                        target_cat = c
+                        reused_category = True
+                        break
 
-        # Define channel specs per layout
-        # Each spec: (ch_name, [categories], topic)
+            # If still not found, create it safely
+            if not target_cat:
+                await report(f"Creating category `{cat_label}`…")
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
+                    me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_webhooks=True),
+                }
+                try:
+                    target_cat = await guild.create_category(
+                        name=cat_label,
+                        overwrites=overwrites,
+                        reason="MomentumOne Unified Webhook Logging Category Setup",
+                    )
+                    created_category = True
+                    await asyncio.sleep(cls._OPERATION_DELAY)
+                except discord.RateLimited as rle:
+                    wait_sec = getattr(rle, "retry_after", 2.0)
+                    await report(f"Rate limited by Discord. Backing off for {wait_sec:.1f}s…")
+                    await asyncio.sleep(wait_sec + 0.5)
+                    # Verify if category was created before retrying
+                    for c in guild.categories:
+                        if c.name.strip().lower() == cat_label.strip().lower():
+                            target_cat = c
+                            break
+                    if not target_cat:
+                        target_cat = await guild.create_category(
+                            name=cat_label,
+                            overwrites=overwrites,
+                            reason="MomentumOne Unified Webhook Logging Category Setup",
+                        )
+                        created_category = True
+                except Exception as err:
+                    return {
+                        "success": False,
+                        "error": f"Failed to create category `{cat_label}`: {redact_webhook_credentials(str(err))}",
+                        "step": "category_creation",
+                    }
+
+        # 2. Build Specs based on layout
         specs = []
         if layout == "compact":
             general_cats = [
@@ -628,45 +786,259 @@ class UnifiedWebhookLogger:
             specs.append(("moderation-logs", [LogCategory.MODERATION, LogCategory.MEMBERS], "Moderation Logs"))
             specs.append(("server-logs", [LogCategory.CHANNELS, LogCategory.ROLES, LogCategory.SERVER, LogCategory.CONFIG], "Server Logs"))
 
-        for ch_name, cats, topic in specs:
-            ch, wh, err = await cls.create_logging_channel_with_webhook(
-                guild=guild,
-                channel_name=ch_name,
-                category=target_cat,
-                topic=topic,
-            )
-            if ch and wh:
-                created_channels.append(ch)
-                for cat in cats:
-                    created_destinations[cat] = {
-                        "channel_id": str(ch.id),
-                        "channel_name": ch.name,
-                        "webhook_id": str(wh.id),
-                        "webhook_url": wh.url,
-                    }
-                created_destinations["general"] = {
-                    "channel_id": str(ch.id),
-                    "channel_name": ch.name,
-                    "webhook_id": str(wh.id),
-                    "webhook_url": wh.url,
-                }
-            else:
-                errors.append(f"Channel `{ch_name}`: {err}")
+        created_channels = []
+        reused_channels = []
+        all_channels = []
+        new_destinations = {}
+        errors = []
 
-        # Persist to database
+        # 3. Channel & Webhook Resolution with Reuse and Rate-Limiting
+        for ch_name, cats, topic in specs:
+            target_ch: Optional[discord.TextChannel] = None
+            is_reused_ch = False
+
+            # (A) Check existing destination record
+            for cat in cats:
+                d = existing_destinations.get(cat)
+                if d and isinstance(d, dict) and d.get("channel_id"):
+                    c_cand = guild.get_channel(int(d["channel_id"]))
+                    if isinstance(c_cand, discord.TextChannel) and c_cand.name == ch_name:
+                        target_ch = c_cand
+                        is_reused_ch = True
+                        break
+
+            # (B) Check target category's existing channels
+            if not target_ch and target_cat:
+                for c_cand in target_cat.text_channels:
+                    if c_cand.name.lower() == ch_name.lower():
+                        target_ch = c_cand
+                        is_reused_ch = True
+                        break
+
+            # (C) Check guild text channels if not bound to a category
+            if not target_ch and not target_cat:
+                for c_cand in guild.text_channels:
+                    if c_cand.name.lower() == ch_name.lower():
+                        target_ch = c_cand
+                        is_reused_ch = True
+                        break
+
+            # If channel doesn't exist, create it with rate-limit protection
+            if not target_ch:
+                await report(f"Creating channel `#{ch_name}`…")
+                # Conservative delay to prevent burst rate limits
+                await asyncio.sleep(cls._OPERATION_DELAY)
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
+                    me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_webhooks=True),
+                }
+                try:
+                    target_ch = await guild.create_text_channel(
+                        name=ch_name,
+                        category=target_cat,
+                        topic=topic or f"{settings.BOT_NAME} Unified Audit & Event Logging",
+                        overwrites=overwrites,
+                        reason="MomentumOne Unified Webhook Logging System Setup",
+                    )
+                    created_channels.append(target_ch)
+                except discord.RateLimited as rle:
+                    wait_sec = getattr(rle, "retry_after", 2.5)
+                    await report(f"Rate limit encountered. Waiting {wait_sec:.1f}s…")
+                    await asyncio.sleep(wait_sec + 0.5)
+                    # Verify if channel was actually created before retrying
+                    for c_cand in (target_cat.text_channels if target_cat else guild.text_channels):
+                        if c_cand.name.lower() == ch_name.lower():
+                            target_ch = c_cand
+                            break
+                    if not target_ch:
+                        target_ch = await guild.create_text_channel(
+                            name=ch_name,
+                            category=target_cat,
+                            topic=topic,
+                            overwrites=overwrites,
+                            reason="MomentumOne Unified Webhook Logging System Setup",
+                        )
+                    created_channels.append(target_ch)
+                except Exception as err:
+                    errors.append(f"Failed to create `#{ch_name}`: {redact_webhook_credentials(str(err))}")
+                    continue
+            else:
+                reused_channels.append(target_ch)
+
+            all_channels.append(target_ch)
+
+            # Webhook Resolution & Reuse
+            await report(f"Configuring webhook for `#{target_ch.name}`…")
+            target_wh: Optional[discord.Webhook] = None
+            try:
+                wh_list = await target_ch.webhooks()
+                # Find bot's own webhook or logger webhook
+                target_wh = next((w for w in wh_list if (w.user and w.user.id == me.id) or w.name.startswith(settings.BOT_NAME)), None)
+                if not target_wh and wh_list:
+                    target_wh = next((w for w in wh_list if w.url), None)
+
+                if not target_wh:
+                    await asyncio.sleep(0.5)
+                    target_wh = await target_ch.create_webhook(
+                        name=f"{settings.BOT_NAME} Logger",
+                        reason="MomentumOne Unified Logging Webhook",
+                    )
+            except discord.RateLimited as rle:
+                wait_sec = getattr(rle, "retry_after", 2.0)
+                await report(f"Webhook rate limit. Waiting {wait_sec:.1f}s…")
+                await asyncio.sleep(wait_sec + 0.5)
+                target_wh = await target_ch.create_webhook(
+                    name=f"{settings.BOT_NAME} Logger",
+                    reason="MomentumOne Unified Logging Webhook",
+                )
+            except Exception as err:
+                errors.append(f"Webhook error in `#{target_ch.name}`: {redact_webhook_credentials(str(err))}")
+                continue
+
+            if target_wh and target_wh.url:
+                cls._webhook_cache[(str(guild.id), str(target_ch.id))] = target_wh.url
+                dest_data = {
+                    "channel_id": str(target_ch.id),
+                    "channel_name": target_ch.name,
+                    "webhook_id": str(target_wh.id),
+                    "webhook_url": target_wh.url,
+                }
+                for cat in cats:
+                    new_destinations[cat] = dest_data
+                if "general" not in new_destinations:
+                    new_destinations["general"] = dest_data
+
+        await report("Registering log destinations…")
         cfg_updates = {
             "enabled": True,
             "layout": layout,
             "category_id": str(target_cat.id) if target_cat else None,
             "separate_antinuke": separate_antinuke,
-            "destinations": created_destinations,
+            "destinations": new_destinations,
         }
         await cls.save_guild_logging_config(str(guild.id), cfg_updates)
 
+        await report("Verifying configuration…")
+        success = len(all_channels) > 0 and len(new_destinations) > 0
+
         return {
-            "success": len(created_channels) > 0,
+            "success": success,
             "category": target_cat,
-            "channels": created_channels,
-            "destinations": created_destinations,
+            "created_category": created_category,
+            "reused_category": reused_category,
+            "created_channels": created_channels,
+            "reused_channels": reused_channels,
+            "channels": all_channels,
+            "destinations": new_destinations,
             "errors": errors,
         }
+
+    @classmethod
+    async def cleanup_logging_resources(
+        cls,
+        guild: discord.Guild,
+        channel_ids: Optional[List[Union[int, str]]] = None,
+        delete_from_discord: bool = False,
+        delete_category: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Safely removes logging resources created and managed by MomentumOne.
+        Never touches user-created or third-party channels.
+        Cleans up associated webhooks, DB destinations, and in-memory caches.
+        """
+        cfg = cls.get_guild_logging_config(str(guild.id))
+        destinations = dict(cfg.get("destinations", {}))
+        me = getattr(guild, "me", None)
+
+        filter_cids = {str(cid) for cid in channel_ids} if channel_ids else None
+        deleted_channels = []
+        deleted_webhooks = []
+        errors = []
+
+        # Find target logging channels to clean up
+        managed_ch_ids = set()
+        for d in destinations.values():
+            if isinstance(d, dict) and d.get("channel_id"):
+                cid = str(d["channel_id"])
+                if filter_cids is None or cid in filter_cids:
+                    managed_ch_ids.add(cid)
+
+        for cid in managed_ch_ids:
+            ch = guild.get_channel(int(cid))
+            # Invalidate webhook cache
+            cls._webhook_cache.pop((str(guild.id), cid), None)
+
+            if isinstance(ch, discord.TextChannel):
+                # Verify channel ownership to protect non-logging channels
+                is_logging_ch = (
+                    "Unified Audit" in (ch.topic or "")
+                    or "Logging" in (ch.topic or "")
+                    or (ch.category and str(ch.category.id) == str(cfg.get("category_id")))
+                )
+
+                if is_logging_ch and me and getattr(me.guild_permissions, "manage_webhooks", False):
+                    try:
+                        whs = await ch.webhooks()
+                        for wh in whs:
+                            if (wh.user and wh.user.id == me.id) or wh.name.startswith(settings.BOT_NAME):
+                                await wh.delete(reason="MomentumOne Logging Resource Decommission")
+                                deleted_webhooks.append(wh.name)
+                    except Exception as err:
+                        errors.append(f"Webhook deletion error in <#{cid}>: {redact_webhook_credentials(str(err))}")
+
+                if delete_from_discord and is_logging_ch and me and getattr(me.guild_permissions, "manage_channels", False):
+                    try:
+                        ch_name = ch.name
+                        await ch.delete(reason="MomentumOne Logging Resource Decommission")
+                        deleted_channels.append(ch_name)
+                    except Exception as err:
+                        errors.append(f"Channel deletion error for <#{cid}>: {redact_webhook_credentials(str(err))}")
+
+        # Remove cleaned up channels from destinations
+        new_destinations = {}
+        for cat, d in destinations.items():
+            if isinstance(d, dict) and str(d.get("channel_id")) in managed_ch_ids:
+                continue
+            new_destinations[cat] = d
+
+        # Check category cleanup if requested
+        deleted_cat = False
+        cat_id = cfg.get("category_id")
+        if delete_category and cat_id:
+            cat = guild.get_channel(int(cat_id))
+            if isinstance(cat, discord.CategoryChannel) and me and getattr(me.guild_permissions, "manage_channels", False):
+                # Ensure category is empty or only contained logging channels
+                remaining = [c for c in cat.channels if str(c.id) not in managed_ch_ids]
+                if not remaining:
+                    try:
+                        await cat.delete(reason="MomentumOne Logging Category Decommission")
+                        deleted_cat = True
+                    except Exception as err:
+                        errors.append(f"Category deletion error: {redact_webhook_credentials(str(err))}")
+
+        # Update and persist config
+        is_still_enabled = len(new_destinations) > 0 and cfg.get("enabled", False)
+        updates = {
+            "destinations": new_destinations,
+            "enabled": is_still_enabled,
+        }
+        if deleted_cat or not new_destinations:
+            updates["category_id"] = None
+
+        await cls.save_guild_logging_config(str(guild.id), updates)
+
+        return {
+            "success": True,
+            "deleted_channels": deleted_channels,
+            "deleted_webhooks": deleted_webhooks,
+            "deleted_category": deleted_cat,
+            "remaining_destinations": len(new_destinations),
+            "errors": errors,
+        }
+
+
+# Top-level module convenience aliases
+acquire_setup_lock = UnifiedWebhookLogger.acquire_setup_lock
+release_setup_lock = UnifiedWebhookLogger.release_setup_lock
+is_setup_in_progress = UnifiedWebhookLogger.is_setup_in_progress
+

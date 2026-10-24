@@ -7,10 +7,12 @@ class Event:
         execute: Callable[..., Any],
         description: Optional[str] = None,
         enabled: bool = True,
-        hidden: bool = False
+        hidden: bool = False,
+        category: Optional[str] = None
     ):
         self.name = name
         self.execute = execute
         self.description = description
         self.enabled = enabled
         self.hidden = hidden
+        self.category = category

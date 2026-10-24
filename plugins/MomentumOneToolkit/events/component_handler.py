@@ -1187,48 +1187,207 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     await interaction.response.edit_message(view=view)
 
             elif wiz_action == "confirm_execute":
-                res = await UnifiedWebhookLogger.create_logging_setup_workflow(
-                    guild=guild,
-                    layout=sess.get("layout", "category"),
-                    create_category=(sess.get("mode") == "category"),
-                    category_name=sess.get("category_name"),
-                    separate_antinuke=sess.get("separate_antinuke", True),
-                )
-                clear_logging_wizard_session(guild.id)
+                # 1. Acquire single-setup lock per guild
+                acquired = await UnifiedWebhookLogger.acquire_setup_lock(guild.id)
+                if not acquired:
+                    busy_box = (
+                        ContainerBuilder()
+                        .set_accent_color(COLORS.get("warning", "#F59E0B"))
+                        .add_text_display(f"### {EMOJIS.get('warning', '⚠️')} Setup Already In Progress")
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_text_display(
+                            "A logging setup or channel creation operation is already running for this server.\n"
+                            "Please wait for the current operation to complete to prevent duplicate channels."
+                        )
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_action_row(
+                            ActionRowBuilder().add_button(
+                                ButtonBuilder()
+                                .set_custom_id(f"log_cfg:panel:{guild.id}")
+                                .set_label("Back to Logging Panel")
+                                .set_style(ButtonStyle.Primary)
+                                .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+                            )
+                        )
+                        .build()
+                    )
+                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                        await interaction.response.edit_message(view=busy_box)
+                    return
 
-                if res.get("success"):
-                    ch_count = len(res.get("channels", []))
+                # 2. Validate permissions
+                me = getattr(guild, "me", None)
+                can_manage_ch = bool(me and getattr(me.guild_permissions, "manage_channels", False))
+                can_manage_wh = bool(me and getattr(me.guild_permissions, "manage_webhooks", False))
+
+                if not can_manage_ch or not can_manage_wh:
+                    await UnifiedWebhookLogger.release_setup_lock(guild.id)
+                    perm_err_box = (
+                        ContainerBuilder()
+                        .set_accent_color(COLORS.get("error", "#EF4444"))
+                        .add_text_display(f"### {EMOJIS.get('cross', '❌')} Missing Required Permissions")
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_text_display(
+                            "The bot is missing required permissions to configure logging.\n"
+                            "Please ensure the bot has both `Manage Channels` and `Manage Webhooks` permissions."
+                        )
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_action_row(
+                            ActionRowBuilder().add_button(
+                                ButtonBuilder()
+                                .set_custom_id(f"log_wiz:confirm_execute:{guild.id}")
+                                .set_label("Retry")
+                                .set_style(ButtonStyle.Primary)
+                                .set_emoji(EMOJIS.get("refresh", "🔄"))
+                            ).add_button(
+                                ButtonBuilder()
+                                .set_custom_id(f"log_cfg:panel:{guild.id}")
+                                .set_label("Cancel")
+                                .set_style(ButtonStyle.Secondary)
+                                .set_emoji(EMOJIS.get("cross", "❌"))
+                            )
+                        )
+                        .build()
+                    )
+                    if hasattr(interaction, "response") and not interaction.response.is_done():
+                        await interaction.response.edit_message(view=perm_err_box)
+                    return
+
+                # 3. Helper to render real-time progress screen (Create Channels button removed/disabled)
+                def make_progress_view(step_desc: str) -> Any:
+                    return (
+                        ContainerBuilder()
+                        .set_accent_color(COLORS.get("info", "#0844C5"))
+                        .add_text_display(f"### {EMOJIS.get('refresh', '🔄')} Deploying Logging System")
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_text_display(
+                            f"**Current Status:**\n{step_desc}\n\n"
+                            f"-# *MomentumOne is inspecting existing resources and applying rate-limited operations…*"
+                        )
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_action_row(
+                            ActionRowBuilder().add_button(
+                                ButtonBuilder()
+                                .set_custom_id("log_busy:locked")
+                                .set_label("Deploying Resources…")
+                                .set_style(ButtonStyle.Secondary)
+                                .set_disabled(True)
+                                .set_emoji(EMOJIS.get("refresh", "🔄"))
+                            )
+                        )
+                        .set_footer(f"{settings.BOT_NAME} Automated Pipeline")
+                        .build()
+                    )
+
+                # Edit message immediately to first progress state
+                initial_prog = make_progress_view("Preparing logging configuration…")
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=initial_prog)
+
+                # 4. Define live progress callback
+                async def progress_reporter(status_text: str):
+                    try:
+                        v = make_progress_view(status_text)
+                        if hasattr(interaction, "edit_original_response"):
+                            await interaction.edit_original_response(view=v)
+                        elif hasattr(interaction, "message") and hasattr(interaction.message, "edit"):
+                            await interaction.message.edit(view=v)
+                    except Exception as err:
+                        logger.debug(f"[LoggingWizard] Progress view edit skipped: {err}")
+
+                # 5. Execute setup workflow safely
+                res = None
+                try:
+                    res = await UnifiedWebhookLogger.create_logging_setup_workflow(
+                        guild=guild,
+                        layout=sess.get("layout", "category"),
+                        create_category=(sess.get("mode") == "category"),
+                        category_name=sess.get("category_name"),
+                        separate_antinuke=sess.get("separate_antinuke", True),
+                        progress_callback=progress_reporter,
+                    )
+                except Exception as ex:
+                    res = {"success": False, "error": str(ex), "step": "workflow_exception"}
+                finally:
+                    await UnifiedWebhookLogger.release_setup_lock(guild.id)
+                    clear_logging_wizard_session(guild.id)
+
+                # 6. Post-completion summary
+                if res and res.get("success"):
+                    created_count = len(res.get("created_channels", []))
+                    reused_count = len(res.get("reused_channels", []))
+                    total_ch = len(res.get("channels", []))
+                    cat_status = "Reused existing category" if res.get("reused_category") else ("Created dedicated category" if res.get("created_category") else "No category used")
+
                     msg = (
                         f"Logging system successfully deployed!\n\n"
-                        f"• Created `{ch_count}` dedicated private logging channels.\n"
-                        f"• Configured `{len(res.get('destinations', {}))}` webhook routes.\n"
-                        f"• Validated delivery endpoints and locked permissions."
+                        f"• **Category:** `{cat_status}`\n"
+                        f"• **Channels Created:** `{created_count}`\n"
+                        f"• **Channels Reused:** `{reused_count}`\n"
+                        f"• **Total Active Channels:** `{total_ch}`\n"
+                        f"• **Configured Webhook Routes:** `{len(res.get('destinations', {}))}`\n"
+                        f"• **Idempotency:** Reused matching resources; zero duplicate categories/channels created."
                     )
                     c_style = "success"
-                else:
-                    msg = f"Setup encountered errors: {res.get('error', 'Failed to complete channel/webhook provisioning.')}"
-                    c_style = "error"
 
-                box = (
-                    ContainerBuilder()
-                    .set_accent_color(COLORS.get(c_style, "#3FD438"))
-                    .add_text_display(f"### {EMOJIS.get('check' if res.get('success') else 'cross', '✅')} Logging Setup Result")
-                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                    .add_text_display(msg)
-                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-                    .add_action_row(
-                        ActionRowBuilder().add_button(
-                            ButtonBuilder()
-                            .set_custom_id(f"log_cfg:panel:{guild.id}")
-                            .set_label("Open Logging Panel")
-                            .set_style(ButtonStyle.Primary)
-                            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+                    box = (
+                        ContainerBuilder()
+                        .set_accent_color(COLORS.get(c_style, "#3FD438"))
+                        .add_text_display(f"### {EMOJIS.get('check', '✅')} Logging Setup Complete")
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_text_display(msg)
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_action_row(
+                            ActionRowBuilder().add_button(
+                                ButtonBuilder()
+                                .set_custom_id(f"log_cfg:panel:{guild.id}")
+                                .set_label("Open Logging Panel")
+                                .set_style(ButtonStyle.Primary)
+                                .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+                            )
                         )
+                        .set_footer(f"{settings.BOT_NAME} Unified Logger")
+                        .build()
                     )
-                    .set_footer(f"{settings.BOT_NAME} Unified Logger")
-                    .build()
-                )
-                if hasattr(interaction, "response") and not interaction.response.is_done():
+                else:
+                    failed_step = res.get("step", "Execution") if res else "Execution"
+                    err_detail = res.get("error", "Unknown error during setup.") if res else "Unknown error."
+                    msg = (
+                        f"Setup encountered an error during **{failed_step}**:\n"
+                        f"*{err_detail}*\n\n"
+                        f"You can safely retry the operation without creating duplicate channels."
+                    )
+                    box = (
+                        ContainerBuilder()
+                        .set_accent_color(COLORS.get("error", "#EF4444"))
+                        .add_text_display(f"### {EMOJIS.get('cross', '❌')} Logging Setup Failed")
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_text_display(msg)
+                        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                        .add_action_row(
+                            ActionRowBuilder()
+                            .add_button(
+                                ButtonBuilder()
+                                .set_custom_id(f"log_wiz:confirm_execute:{guild.id}")
+                                .set_label("Retry Setup")
+                                .set_style(ButtonStyle.Primary)
+                                .set_emoji(EMOJIS.get("refresh", "🔄"))
+                            )
+                            .add_button(
+                                ButtonBuilder()
+                                .set_custom_id(f"log_cfg:panel:{guild.id}")
+                                .set_label("Back to Logging Panel")
+                                .set_style(ButtonStyle.Secondary)
+                                .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+                            )
+                        )
+                        .set_footer(f"{settings.BOT_NAME} Unified Logger")
+                        .build()
+                    )
+
+                if hasattr(interaction, "edit_original_response"):
+                    await interaction.edit_original_response(view=box)
+                elif hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=box)
 
             elif wiz_action == "cancel":
@@ -1245,8 +1404,9 @@ async def execute(ctx: Any, interaction: discord.Interaction):
             from plugins.MomentumOneToolkit.commands.general.logging import (
                 build_logging_panel_view,
                 build_assign_channel_view,
+                build_cleanup_confirm_view,
             )
-            from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory
+            from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, redact_webhook_credentials
 
             parts = custom_id.split(":")
             cfg_action = parts[1] if len(parts) > 1 else ""
@@ -1287,56 +1447,77 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     await interaction.response.edit_message(view=view)
 
             elif cfg_action == "create_one":
-                ch, wh, err = await UnifiedWebhookLogger.create_logging_channel_with_webhook(
+                # Use idempotent setup workflow with compact layout
+                await UnifiedWebhookLogger.create_logging_setup_workflow(
                     guild=guild,
-                    channel_name="server-logs",
-                    topic=f"{settings.BOT_NAME} Unified Audit & Server Logs",
+                    layout="compact",
+                    create_category=False,
+                    separate_antinuke=False,
                 )
-                if ch and wh:
-                    cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
-                    dests = dict(cfg.get("destinations", {}))
-                    entry = {
-                        "channel_id": str(ch.id),
-                        "channel_name": ch.name,
-                        "webhook_id": str(wh.id),
-                        "webhook_url": wh.url,
-                    }
-                    dests["general"] = entry
-                    for c in [LogCategory.MODERATION, LogCategory.CHANNELS, LogCategory.ROLES, LogCategory.MEMBERS, LogCategory.SERVER, LogCategory.CONFIG]:
-                        if c not in dests:
-                            dests[c] = entry
-                    await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"destinations": dests, "enabled": True})
                 view = await build_logging_panel_view(guild)
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=view)
 
             elif cfg_action == "create_two":
-                ch1, wh1, _ = await UnifiedWebhookLogger.create_logging_channel_with_webhook(
+                # Use idempotent setup workflow with dual layout
+                await UnifiedWebhookLogger.create_logging_setup_workflow(
                     guild=guild,
-                    channel_name="moderation-logs",
-                    topic=f"{settings.BOT_NAME} Moderation & Member Audit Logs",
+                    layout="dual",
+                    create_category=False,
+                    separate_antinuke=False,
                 )
-                ch2, wh2, _ = await UnifiedWebhookLogger.create_logging_channel_with_webhook(
-                    guild=guild,
-                    channel_name="server-logs",
-                    topic=f"{settings.BOT_NAME} Server & Integration Logs",
-                )
-                if ch1 and ch2 and wh1 and wh2:
-                    cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
-                    dests = dict(cfg.get("destinations", {}))
-                    mod_entry = {"channel_id": str(ch1.id), "channel_name": ch1.name, "webhook_id": str(wh1.id), "webhook_url": wh1.url}
-                    srv_entry = {"channel_id": str(ch2.id), "channel_name": ch2.name, "webhook_id": str(wh2.id), "webhook_url": wh2.url}
-                    dests[LogCategory.MODERATION] = mod_entry
-                    dests[LogCategory.MEMBERS] = mod_entry
-                    dests[LogCategory.CHANNELS] = srv_entry
-                    dests[LogCategory.ROLES] = srv_entry
-                    dests[LogCategory.SERVER] = srv_entry
-                    dests[LogCategory.CONFIG] = srv_entry
-                    dests["general"] = srv_entry
-                    await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"destinations": dests, "layout": "dual", "enabled": True})
                 view = await build_logging_panel_view(guild)
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "cleanup_prompt":
+                view = await build_cleanup_confirm_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif cfg_action == "do_cleanup":
+                cleanup_mode = parts[2] if len(parts) > 2 else "config"
+                delete_discord = (cleanup_mode == "full")
+                res = await UnifiedWebhookLogger.cleanup_logging_resources(
+                    guild=guild,
+                    delete_from_discord=delete_discord,
+                    delete_category=delete_discord,
+                )
+
+                del_ch = len(res.get("deleted_channels", []))
+                del_wh = len(res.get("deleted_webhooks", []))
+                cat_del = "Yes" if res.get("deleted_category") else "No"
+
+                report_msg = (
+                    f"Logging resources cleanup completed!\n\n"
+                    f"• **Cleanup Scope:** `{'Full Discord & DB' if delete_discord else 'Database Configuration Only'}`\n"
+                    f"• **Channels Deleted:** `{del_ch}`\n"
+                    f"• **Webhooks Deleted:** `{del_wh}`\n"
+                    f"• **Empty Category Removed:** `{cat_del}`\n"
+                    f"• **Database Records:** Reset and unmapped."
+                )
+
+                box = (
+                    ContainerBuilder()
+                    .set_accent_color(COLORS.get("success", "#3FD438"))
+                    .add_text_display(f"### {EMOJIS.get('check', '✅')} Cleanup Complete")
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_text_display(report_msg)
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_action_row(
+                        ActionRowBuilder().add_button(
+                            ButtonBuilder()
+                            .set_custom_id(f"log_cfg:panel:{guild.id}")
+                            .set_label("Back to Logging Panel")
+                            .set_style(ButtonStyle.Primary)
+                            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+                        )
+                    )
+                    .set_footer(f"{settings.BOT_NAME} Unified Logger")
+                    .build()
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=box)
 
             elif cfg_action == "test_webhooks":
                 cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
@@ -1348,7 +1529,8 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                         cid = d.get("channel_id")
                         ch_tested.add(cid)
                         ok, msg = await UnifiedWebhookLogger.test_webhook(guild, cid)
-                        results.append(f"• <#{cid}>: {'✅ Success' if ok else f'❌ Failed ({msg})'}")
+                        safe_msg = redact_webhook_credentials(msg)
+                        results.append(f"• <#{cid}>: {'✅ Success' if ok else f'❌ Failed ({safe_msg})'}")
 
                 summary_msg = "\n".join(results) if results else "No channel destinations configured to test."
                 box = (

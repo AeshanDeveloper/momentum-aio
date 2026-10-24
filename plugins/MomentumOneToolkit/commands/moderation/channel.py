@@ -167,6 +167,7 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
                         channel_id=target_channel.id
                     ),
                     variables={"channel_id": str(target_channel.id), "seconds": 0},
+                )
             asyncio.create_task(
                 UnifiedWebhookLogger.dispatch_log(
                     guild=guild,

@@ -99,7 +99,18 @@ class BotManager:
                 except Exception as err:
                     logger.error(f"[BotManager] Error executing interaction handler {h.name}: {err}")
 
-        # Wire Anti-Nuke Security Event Listeners
+        # Helper to dispatch events to registered plugin listeners (e.g., dedicated logging handlers)
+        async def _dispatch_plugin_events(ev_name: str, *args: Any, **kwargs: Any) -> None:
+            handlers = events_registry.get(ev_name)
+            for h in handlers:
+                if getattr(h, "category", None) == "antinuke":
+                    continue
+                try:
+                    await h.execute(self.plugin_context, *args, **kwargs)
+                except Exception as err:
+                    logger.error(f"[BotManager] Error in event listener {h.name} ({getattr(h, 'description', '')}): {err}")
+
+        # Wire Anti-Nuke Security Event Listeners and Plugin Listeners
         from core.security.antinuke_service import AntiNukeService
 
         @self.client.event
@@ -108,6 +119,7 @@ class BotManager:
                 await AntiNukeService.on_guild_update(before, after)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_update: {err}")
+            await _dispatch_plugin_events("on_guild_update", before, after)
 
         @self.client.event
         async def on_member_ban(guild: discord.Guild, user: discord.User | discord.Member):
@@ -115,6 +127,7 @@ class BotManager:
                 await AntiNukeService.on_member_ban(guild, user)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_member_ban: {err}")
+            await _dispatch_plugin_events("on_member_ban", guild, user)
 
         @self.client.event
         async def on_member_unban(guild: discord.Guild, user: discord.User | discord.Member):
@@ -122,6 +135,7 @@ class BotManager:
                 await AntiNukeService.on_member_unban(guild, user)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_member_unban: {err}")
+            await _dispatch_plugin_events("on_member_unban", guild, user)
 
         @self.client.event
         async def on_member_remove(member: discord.Member):
@@ -129,6 +143,7 @@ class BotManager:
                 await AntiNukeService.on_member_remove(member)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_member_remove: {err}")
+            await _dispatch_plugin_events("on_member_remove", member)
 
         @self.client.event
         async def on_member_join(member: discord.Member):
@@ -136,6 +151,7 @@ class BotManager:
                 await AntiNukeService.on_member_join(member)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_member_join: {err}")
+            await _dispatch_plugin_events("on_member_join", member)
 
         @self.client.event
         async def on_member_update(before: discord.Member, after: discord.Member):
@@ -143,6 +159,7 @@ class BotManager:
                 await AntiNukeService.on_member_update(before, after)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_member_update: {err}")
+            await _dispatch_plugin_events("on_member_update", before, after)
 
         @self.client.event
         async def on_guild_role_create(role: discord.Role):
@@ -150,6 +167,7 @@ class BotManager:
                 await AntiNukeService.on_guild_role_create(role)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_role_create: {err}")
+            await _dispatch_plugin_events("on_guild_role_create", role)
 
         @self.client.event
         async def on_guild_role_delete(role: discord.Role):
@@ -157,6 +175,7 @@ class BotManager:
                 await AntiNukeService.on_guild_role_delete(role)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_role_delete: {err}")
+            await _dispatch_plugin_events("on_guild_role_delete", role)
 
         @self.client.event
         async def on_guild_role_update(before: discord.Role, after: discord.Role):
@@ -164,6 +183,7 @@ class BotManager:
                 await AntiNukeService.on_guild_role_update(before, after)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_role_update: {err}")
+            await _dispatch_plugin_events("on_guild_role_update", before, after)
 
         @self.client.event
         async def on_guild_channel_create(channel: discord.abc.GuildChannel):
@@ -171,6 +191,7 @@ class BotManager:
                 await AntiNukeService.on_guild_channel_create(channel)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_channel_create: {err}")
+            await _dispatch_plugin_events("on_guild_channel_create", channel)
 
         @self.client.event
         async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
@@ -178,6 +199,7 @@ class BotManager:
                 await AntiNukeService.on_guild_channel_delete(channel)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_channel_delete: {err}")
+            await _dispatch_plugin_events("on_guild_channel_delete", channel)
 
         @self.client.event
         async def on_guild_channel_update(before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
@@ -185,6 +207,7 @@ class BotManager:
                 await AntiNukeService.on_guild_channel_update(before, after)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_channel_update: {err}")
+            await _dispatch_plugin_events("on_guild_channel_update", before, after)
 
         @self.client.event
         async def on_guild_emojis_update(guild: discord.Guild, before: Any, after: Any):
@@ -192,6 +215,7 @@ class BotManager:
                 await AntiNukeService.on_guild_emojis_update(guild, before, after)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_emojis_update: {err}")
+            await _dispatch_plugin_events("on_guild_emojis_update", guild, before, after)
 
         @self.client.event
         async def on_guild_stickers_update(guild: discord.Guild, before: Any, after: Any):
@@ -199,6 +223,7 @@ class BotManager:
                 await AntiNukeService.on_guild_stickers_update(guild, before, after)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_stickers_update: {err}")
+            await _dispatch_plugin_events("on_guild_stickers_update", guild, before, after)
 
         @self.client.event
         async def on_webhooks_update(channel: discord.abc.GuildChannel):
@@ -206,6 +231,7 @@ class BotManager:
                 await AntiNukeService.on_webhooks_update(channel)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_webhooks_update: {err}")
+            await _dispatch_plugin_events("on_webhooks_update", channel)
 
         @self.client.event
         async def on_invite_create(invite: discord.Invite):
@@ -213,6 +239,7 @@ class BotManager:
                 await AntiNukeService.on_invite_create(invite)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_invite_create: {err}")
+            await _dispatch_plugin_events("on_invite_create", invite)
 
         @self.client.event
         async def on_invite_delete(invite: discord.Invite):
@@ -220,6 +247,7 @@ class BotManager:
                 await AntiNukeService.on_invite_delete(invite)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_invite_delete: {err}")
+            await _dispatch_plugin_events("on_invite_delete", invite)
 
         @self.client.event
         async def on_guild_integrations_update(guild: discord.Guild):
@@ -227,6 +255,7 @@ class BotManager:
                 await AntiNukeService.on_guild_integrations_update(guild)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_integrations_update: {err}")
+            await _dispatch_plugin_events("on_guild_integrations_update", guild)
 
         @self.client.event
         async def on_auto_moderation_rule_create(rule: Any):
@@ -234,6 +263,7 @@ class BotManager:
                 await AntiNukeService.on_auto_moderation_rule_create(rule)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_auto_moderation_rule_create: {err}")
+            await _dispatch_plugin_events("on_auto_moderation_rule_create", rule)
 
         @self.client.event
         async def on_auto_moderation_rule_update(rule: Any):
@@ -241,6 +271,7 @@ class BotManager:
                 await AntiNukeService.on_auto_moderation_rule_update(rule)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_auto_moderation_rule_update: {err}")
+            await _dispatch_plugin_events("on_auto_moderation_rule_update", rule)
 
         @self.client.event
         async def on_auto_moderation_rule_delete(rule: Any):
@@ -248,6 +279,7 @@ class BotManager:
                 await AntiNukeService.on_auto_moderation_rule_delete(rule)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_auto_moderation_rule_delete: {err}")
+            await _dispatch_plugin_events("on_auto_moderation_rule_delete", rule)
 
         @self.client.event
         async def on_audit_log_entry_create(entry: discord.AuditLogEntry):
@@ -294,10 +326,12 @@ class BotManager:
             reg_events = events_registry.list_all()
             reg_cmds = commands_registry.list_all()
             from core.security.antinuke import AntiNukeConstants
-            antinuke_events = [e for e in reg_events if getattr(e, "canonical_event", None) or e.name.startswith("on_")]
+            antinuke_events = [e for e in reg_events if getattr(e, "category", None) == "antinuke" or getattr(e, "canonical_event", None)]
+            logging_events = [e for e in reg_events if getattr(e, "category", None) == "logging"]
             logger.info(
                 f"[BotManager] Startup Diagnostics: {len(reg_cmds)} commands registered | "
-                f"{len(reg_events)} total event listeners registered ({len(antinuke_events)} security listeners). "
+                f"{len(reg_events)} total event listeners registered ({len(antinuke_events)} security listeners, "
+                f"{len(logging_events)} dedicated logging listeners). "
                 f"Enabled security modes: {AntiNukeConstants.get_enabled_modes()}"
             )
             self._is_setup = True

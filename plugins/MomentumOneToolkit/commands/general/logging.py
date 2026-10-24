@@ -8,6 +8,8 @@ from core.logging.webhook_logger import (
     UnifiedWebhookLogger,
     LogCategory,
     LogSeverity,
+    get_webhook_display_status,
+    redact_webhook_credentials,
 )
 from sdk.discord.builders import (
     ContainerBuilder,
@@ -26,7 +28,7 @@ name = "logging"
 aliases = ["logs", "log", "logsetup"]
 description = "Configure centralized Discord webhook-only logging for security, moderation, and server events."
 category = "General"
-usage = "logging [setup|panel|test|repair|enable|disable]"
+usage = "logging [setup|panel|test|repair|enable|disable|cleanup]"
 user_permissions = ["manage_guild"]
 bot_permissions = ["manage_channels", "manage_webhooks"]
 guild_only = True
@@ -64,6 +66,7 @@ async def build_logging_panel_view(guild: discord.Guild) -> Any:
     """
     Builds the main interactive Webhook Logging Management Dashboard.
     Provides real-time destination health, repair tools, and test dispatchers.
+    Never exposes webhook URLs or secret tokens.
     """
     cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
     is_enabled = cfg.get("enabled", False)
@@ -79,7 +82,7 @@ async def build_logging_panel_view(guild: discord.Guild) -> Any:
         else f"{EMOJIS.get('disabled', '❌')} **PAUSED / UNCONFIGURED**"
     )
 
-    # Build Destinations Overview
+    # Build Destinations Overview without exposing URLs or tokens
     dest_lines = []
     for cat in LogCategory.ALL_CATEGORIES:
         meta = LogCategory.CATEGORY_METADATA.get(cat, {})
@@ -95,28 +98,27 @@ async def build_logging_panel_view(guild: discord.Guild) -> Any:
         elif not dest:
             dest = destinations.get("general")
 
+        wh_status = get_webhook_display_status(guild, dest)
         if dest and isinstance(dest, dict):
             ch_id = dest.get("channel_id")
-            wh_url = dest.get("webhook_url")
-            masked_wh = UnifiedWebhookLogger.mask_webhook_url(wh_url)
             ch_mention = f"<#{ch_id}>" if ch_id else "*Unknown*"
-            dest_lines.append(f"• {c_emoji} **{c_name}:** {ch_mention} (Webhook: {masked_wh}){cat_state}")
+            dest_lines.append(f"• {c_emoji} **{c_name}:** {ch_mention} — Webhook: `{wh_status}`{cat_state}")
         else:
-            dest_lines.append(f"• {c_emoji} **{c_name}:** *Unassigned / Missing Webhook*{cat_state}")
+            dest_lines.append(f"• {c_emoji} **{c_name}:** *Unassigned* — Webhook: `{wh_status}`{cat_state}")
 
     dest_block = "\n".join(dest_lines)
 
-    # Recent failure warning block if any exist
+    # Recent failure warning block if any exist (redacting all credentials)
     warning_block = ""
     if failures:
         recent_err = failures[-1]
-        err_msg = recent_err.get("error", "Unknown delivery error")
+        err_msg = redact_webhook_credentials(recent_err.get("error", "Unknown delivery error"))
         err_ch = recent_err.get("channel_id", "Unknown")
         warning_block = (
             f"\n\n### {EMOJIS.get('danger', '⚠️')} Delivery Failure Warning\n"
             f"Recent webhook dispatch failed in <#{err_ch}>:\n"
             f"*{err_msg}*\n"
-            f"-# Click **Repair Webhook** below to automatically recreate missing or revoked webhooks."
+            f"-# Click **Repair Webhooks** below to securely regenerate missing or revoked webhooks."
         )
 
     summary_text = (
@@ -196,10 +198,10 @@ async def build_logging_panel_view(guild: discord.Guild) -> Any:
         )
         .add_button(
             ButtonBuilder()
-            .set_custom_id(f"log_cfg:toggle_an:{guild.id}")
-            .set_label("Toggle Anti-Nuke Channel")
-            .set_style(ButtonStyle.Secondary)
-            .set_emoji(EMOJIS.get("shield", "🛡️"))
+            .set_custom_id(f"log_cfg:cleanup_prompt:{guild.id}")
+            .set_label("Clean Up / Reset")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("trash", "🗑️"))
         )
         .add_button(
             ButtonBuilder()
@@ -396,7 +398,7 @@ async def build_wizard_step2_view(guild: discord.Guild) -> Any:
 # Setup Wizard Step 3: Preview & Execution Confirmation
 # ==============================================================================
 async def build_wizard_preview_view(guild: discord.Guild) -> Any:
-    """Step 3: Preview resources to be created and request confirmation."""
+    """Step 3: Preview resources to be created and request confirmation, showing reuse status."""
     sess = get_or_create_logging_wizard_session(guild)
     sess["step"] = 3
 
@@ -416,40 +418,68 @@ async def build_wizard_preview_view(guild: discord.Guild) -> Any:
         else f"{EMOJIS.get('cross', '❌')} Missing required permissions (`Manage Channels` and/or `Manage Webhooks`)."
     )
 
+    # Check for existing category and channels to detect reuse
+    cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+    existing_cat = None
+    if cfg.get("category_id"):
+        existing_cat = discord.utils.get(guild.categories, id=int(cfg["category_id"]))
+    if not existing_cat and mode == "category":
+        existing_cat = discord.utils.find(lambda c: c.name.lower() == cat_name.lower(), guild.categories)
+
+    category_status = (
+        f"• **Target Category:** `📁 {existing_cat.name}` *(Existing category will be reused ✅)*"
+        if existing_cat
+        else f"• **Target Category:** `📁 {cat_name}` *(New category will be created ➕)*"
+    )
+
+    # Determine layout target channels
     if layout == "compact":
-        channels_preview = ["• `#server-logs` (General Server, Moderation, Members, Config)"]
+        channel_names = [("server-logs", "General Server, Moderation, Members, Config")]
         if separate_an:
-            channels_preview.append("• `#security-logs` (Anti-Nuke Incidents & Defense Alerts)")
+            channel_names.append(("security-logs", "Anti-Nuke Incidents & Defense Alerts"))
     elif layout == "dual":
-        channels_preview = [
-            "• `#moderation-logs` (Bans, Kicks, Timeouts, Role Grants)",
-            "• `#server-logs` (Channels, Roles, Invites, Webhooks, Emojis)",
+        channel_names = [
+            ("moderation-logs", "Bans, Kicks, Timeouts, Role Grants"),
+            ("server-logs", "Channels, Roles, Invites, Webhooks, Emojis"),
         ]
         if separate_an:
-            channels_preview.append("• `#security-logs` (Anti-Nuke Incidents & Defense Alerts)")
+            channel_names.append(("security-logs", "Anti-Nuke Incidents & Defense Alerts"))
     else:  # category
-        channels_preview = [
-            "• `#security-logs` (Anti-Nuke Incidents & Alerts)",
-            "• `#moderation-logs` (Bans, Unbans, Kicks, Timeouts)",
-            "• `#channel-logs` (Channel Creations, Deletions, Overwrites)",
-            "• `#role-logs` (Role Changes, Permission Escalations)",
-            "• `#member-logs` (Member Joins, Leaves, Nicknames)",
-            "• `#server-logs` (Invites, Integrations, Emojis, System Config)",
+        channel_names = [
+            ("security-logs", "Anti-Nuke Incidents & Alerts"),
+            ("moderation-logs", "Bans, Unbans, Kicks, Timeouts"),
+            ("channel-logs", "Channel Creations, Deletions, Overwrites"),
+            ("role-logs", "Role Changes, Permission Escalations"),
+            ("member-logs", "Member Joins, Leaves, Nicknames"),
+            ("server-logs", "Invites, Integrations, Emojis, System Config"),
         ]
+
+    # Inspect reuse for channels
+    channels_preview = []
+    reused_count = 0
+    new_count = 0
+    search_space = existing_cat.text_channels if existing_cat else guild.text_channels
+    for ch_name, desc_text in channel_names:
+        found_ch = discord.utils.find(lambda c: c.name.lower() == ch_name.lower(), search_space)
+        if found_ch:
+            channels_preview.append(f"• `#{ch_name}` — {desc_text} *(Reuse existing channel ✅)*")
+            reused_count += 1
+        else:
+            channels_preview.append(f"• `#{ch_name}` — {desc_text} *(Create new channel ➕)*")
+            new_count += 1
 
     ch_list_str = "\n".join(channels_preview)
 
     desc = (
         f"**Review Setup Preview:**\n\n"
         f"• **Creation Mode:** `{'Create Dedicated Category' if mode == 'category' else 'Use Existing Channels'}`\n"
-        f"• **Target Category:** `📁 {cat_name}`\n"
-        f"• **Layout Preset:** `{layout.title()}`\n"
-        f"• **Channels & Webhooks to Create ({len(channels_preview)}):**\n"
+        f"{category_status}\n"
+        f"• **Layout Preset:** `{layout.title()}` ({reused_count} to reuse, {new_count} to create)\n"
+        f"• **Channels & Webhook Destinations ({len(channels_preview)}):**\n"
         f"{ch_list_str}\n\n"
         f"• **Permission Validation:**\n"
         f"{perm_status}\n\n"
-        f"-# *Every channel will be created with private permissions (`@everyone` view denied) "
-        f"and an authenticated webhook will be generated automatically.*"
+        f"-# *Setup is idempotent: existing categories, channels, and webhooks are automatically reused.*"
     )
 
     action_row = ActionRowBuilder()
@@ -457,7 +487,7 @@ async def build_wizard_preview_view(guild: discord.Guild) -> Any:
         action_row.add_button(
             ButtonBuilder()
             .set_custom_id(f"log_wiz:confirm_execute:{guild.id}")
-            .set_label("Confirm & Create Resources")
+            .set_label("Confirm & Apply Setup")
             .set_style(ButtonStyle.Success)
             .set_emoji(EMOJIS.get("check", "✅"))
         )
@@ -485,6 +515,62 @@ async def build_wizard_preview_view(guild: discord.Guild) -> Any:
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_action_row(action_row)
         .add_text_display(f"-# {settings.BOT_NAME} Unified Logger Setup • Step 3 of 3")
+        .build()
+    )
+
+
+# ==============================================================================
+# Setup Cleanup / Reset View
+# ==============================================================================
+async def build_cleanup_confirm_view(guild: discord.Guild) -> Any:
+    """Builds confirmation dialog for cleaning up or resetting logging resources."""
+    cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
+    destinations = cfg.get("destinations", {})
+    configured_count = len(destinations)
+
+    desc = (
+        f"**Logging Resource Cleanup & Reset**\n\n"
+        f"Choose how you would like to reset or clean up the logging configuration for **{guild.name}** "
+        f"({configured_count} destinations currently configured):\n\n"
+        f"• **Reset Configuration Only:** Resets database records and disables logging without deleting any Discord channels or categories.\n"
+        f"• **Full Resource Cleanup:** Safely deletes logging-owned channels and webhooks from Discord, removes the category if empty, and clears database configuration.\n\n"
+        f"-# *Note: Only channels created and owned by {settings.BOT_NAME} logging will ever be deleted.*"
+    )
+
+    action_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"log_cfg:do_cleanup:config:{guild.id}")
+            .set_label("Reset Config Only")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("refresh", "🔄"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"log_cfg:do_cleanup:full:{guild.id}")
+            .set_label("Full Resource Cleanup")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("trash", "🗑️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"log_cfg:panel:{guild.id}")
+            .set_label("Cancel")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("cross", "❌"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("warning", "#F59E0B"))
+        .add_text_display(f"### {EMOJIS.get('trash', '🗑️')} Clean Up Logging Resources")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Resource Management")
         .build()
     )
 
@@ -619,6 +705,11 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         await UnifiedWebhookLogger.save_guild_logging_config(str(guild.id), {"enabled": False})
         return await send_ui(message, "common.info", variables={"message": "Unified Webhook Logging paused."}, style="warning")
 
+    elif sub in ["cleanup", "reset"]:
+        view = await build_cleanup_confirm_view(guild)
+        return await send_response(message, view)
+
     # Default: Show Main Logging Panel
     view = await build_logging_panel_view(guild)
     return await send_response(message, view)
+
