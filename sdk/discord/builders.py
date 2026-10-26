@@ -50,6 +50,10 @@ class ButtonBuilder:
 
     def set_custom_id(self, custom_id: str) -> ButtonBuilder:
         self.custom_id = str(custom_id)[:100] if custom_id is not None else None
+        if self.custom_id is not None:
+            self.url = None
+            if self.style == discord.ButtonStyle.link or getattr(self.style, "value", None) == 5 or self.style == 5:
+                self.style = discord.ButtonStyle.secondary
         return self
 
     def set_style(self, style: Union[str, ButtonStyle, discord.ButtonStyle]) -> ButtonBuilder:
@@ -69,6 +73,8 @@ class ButtonBuilder:
             if clean not in mapping:
                 raise ValueError(f"Unknown button style: {style}")
             self.style = mapping[clean]
+        if self.style == discord.ButtonStyle.link or getattr(self.style, "value", None) == 5 or self.style == 5:
+            self.custom_id = None
         return self
 
     def set_emoji(self, emoji: Union[str, discord.PartialEmoji, discord.Emoji]) -> ButtonBuilder:
@@ -83,8 +89,9 @@ class ButtonBuilder:
         return self
 
     def set_url(self, url: str) -> ButtonBuilder:
-        self.url = url
+        self.url = str(url) if url is not None else None
         self.style = discord.ButtonStyle.link
+        self.custom_id = None
         return self
 
     def set_disabled(self, disabled: bool) -> ButtonBuilder:
@@ -96,8 +103,9 @@ class ButtonBuilder:
         return self
 
     def build(self) -> discord.ui.Button:
+        is_link = (self.style == discord.ButtonStyle.link or getattr(self.style, "value", None) == 5 or self.style == 5 or bool(self.url))
         kwargs: Dict[str, Any] = {
-            "style": self.style,
+            "style": discord.ButtonStyle.link if is_link else self.style,
             "disabled": self.disabled,
         }
 
@@ -106,19 +114,28 @@ class ButtonBuilder:
         if self.emoji is not None:
             kwargs["emoji"] = self.emoji
 
-        if self.style == discord.ButtonStyle.link:
+        if is_link:
             if not self.url:
                 raise ValueError("Link buttons require a valid URL.")
             kwargs["url"] = self.url
+            kwargs["custom_id"] = None
         else:
             if self.url:
                 raise ValueError("Only link buttons can have a URL.")
             kwargs["custom_id"] = self.custom_id or f"btn_{id(self)}"
 
         btn = discord.ui.Button(**kwargs)
+        if is_link:
+            btn.custom_id = None
+            btn.url = self.url
+        else:
+            btn.url = None
         if self.callback:
             btn.callback = self.callback
         return btn
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.build().to_dict()
 
 
 class SelectMenuBuilder:

@@ -18,6 +18,7 @@ from plugins.MomentumOneToolkit.events.guild_join import (
     build_welcome_container,
     build_inviter_dm_container,
     execute as execute_guild_join,
+    handle_guild_remove,
     _processed_guilds,
 )
 
@@ -269,6 +270,63 @@ class TestGuildJoinSuite(unittest.IsolatedAsyncioTestCase):
             mock_dm_builder.assert_not_called()
 
         self.assertEqual(channel.send.call_count, 1)
+
+    def test_button_serialization_custom_id_url_mutually_exclusive(self):
+        """Verifies URL buttons serialize with url and without custom_id, and interactive buttons retain custom_id without url."""
+        # URL Button
+        url_btn = ButtonBuilder().set_label("Invite Sentinel").set_url("https://discord.com/invite").build().to_dict()
+        self.assertIn("url", url_btn)
+        self.assertNotIn("custom_id", url_btn)
+        self.assertEqual(url_btn["style"], 5)
+
+        # Interactive Button
+        interactive_btn = ButtonBuilder().set_label("Click").set_custom_id("btn_click").set_style(ButtonStyle.Primary).build().to_dict()
+        self.assertIn("custom_id", interactive_btn)
+        self.assertNotIn("url", interactive_btn)
+        self.assertEqual(interactive_btn["custom_id"], "btn_click")
+
+    async def test_rejoin_after_leave_allows_welcome(self):
+        """Verifies that when Sentinel leaves a guild and rejoins later, the welcome workflow executes legitimately."""
+        channel = discord.TextChannel(id=701, name="general")
+        channel.guild = self.guild
+        channel.send = AsyncMock()
+        self.guild.text_channels = [channel]
+
+        # Initial join
+        await execute_guild_join(self.guild)
+        self.assertEqual(channel.send.call_count, 1)
+
+        # Bot leaves guild
+        handle_guild_remove(self.guild)
+        self.assertNotIn(self.guild.id, _processed_guilds)
+
+        # Bot rejoins guild
+        channel.send.reset_mock()
+        await execute_guild_join(self.guild)
+        self.assertEqual(channel.send.call_count, 1, "Rejoin after departure must be welcomed without suppression")
+
+    async def test_antinuke_on_guild_role_delete_resolution(self):
+        """Verifies that AntiNukeService.on_guild_role_delete cleanly resolves guild without raising AttributeError."""
+        from core.security.antinuke_service import AntiNukeService
+        from core.security.antinuke import AntiNukeManager
+
+        # Ensure guild is setup
+        AntiNukeManager._guild_configs[str(self.guild.id)] = {
+            "guild_id": str(self.guild.id),
+            "setup_completed": True,
+            "enabled": True,
+            "monitored_events": ["roleDelete"],
+        }
+
+        # Role with guild attribute
+        role_with_guild = discord.Role(id=88001, name="Moderator", position=10, guild=self.guild)
+        await AntiNukeService.on_guild_role_delete(role_with_guild)
+
+        # Role without guild attribute (simulating bare role)
+        bare_role = discord.Role(id=88002, name="TestRole", position=5)
+        delattr(bare_role, "guild")
+        # Should not raise AttributeError: 'Role' object has no attribute 'guild'
+        await AntiNukeService.on_guild_role_delete(bare_role, guild=self.guild)
 
 
 if __name__ == "__main__":

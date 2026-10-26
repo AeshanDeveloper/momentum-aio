@@ -177,21 +177,31 @@ class AntiNukeService:
 
     # 7. ROLE DELETION
     @classmethod
-    async def on_guild_role_delete(cls, role: discord.Role) -> None:
-        guild = role.guild
-        if not AntiNukeManager.is_setup_completed(guild.id):
+    async def on_guild_role_delete(cls, role: discord.Role, guild: Optional[discord.Guild] = None) -> None:
+        resolved_guild = guild or getattr(role, "guild", None)
+        if not resolved_guild:
+            client = getattr(role, "_client", None) or getattr(discord, "Client", None)._default_instance
+            if client and hasattr(client, "guilds"):
+                for g in client.guilds:
+                    if any(getattr(r, "id", None) == getattr(role, "id", None) for r in getattr(g, "roles", [])):
+                        resolved_guild = g
+                        break
+        if not resolved_guild:
+            logger.warning(f"[AntiNukeService] Unable to obtain guild context for deleted role {getattr(role, 'id', 'unknown')}.")
+            return
+        if not AntiNukeManager.is_setup_completed(resolved_guild.id):
             return
 
-        entry = await cls._fetch_audit_entry(guild, discord.AuditLogAction.role_delete, target_id=role.id)
+        entry = await cls._fetch_audit_entry(resolved_guild, discord.AuditLogAction.role_delete, target_id=role.id)
         if not entry or not entry.user:
             return
 
         await AntiNukeManager.record_and_evaluate_infraction(
-            guild=guild,
+            guild=resolved_guild,
             executor=entry.user,
             event_type=AntiNukeConstants.EVENT_ROLE_DELETE,
             audit_entry_id=entry.id,
-            details={"role_name": role.name, "role_id": str(role.id)},
+            details={"role_name": getattr(role, "name", f"Role {role.id}"), "role_id": str(role.id)},
         )
 
     # 8. MEMBER UPDATE (Dangerous roles or timeouts)

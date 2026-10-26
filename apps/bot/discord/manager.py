@@ -67,6 +67,11 @@ class BotManager:
             username = str(self.client.user)
             await self._sync_guilds()
             guilds_count = len(self.client.guilds)
+            from plugins.MomentumOneToolkit.events.guild_join import _processed_guilds
+            for g in self.client.guilds:
+                _processed_guilds.add(g.id)
+                if hasattr(self.client, "_initial_guild_ids"):
+                    self.client._initial_guild_ids.add(g.id)
             logger.info(f"[BOT] Connected as {username} | Active in {guilds_count} guild(s).")
             # Trigger on_ready in plugins
             for record in self.plugins.registry.list_all():
@@ -173,7 +178,13 @@ class BotManager:
         @self.client.event
         async def on_guild_role_delete(role: discord.Role):
             try:
-                await AntiNukeService.on_guild_role_delete(role)
+                guild = getattr(role, "guild", None)
+                if not guild:
+                    for g in self.client.guilds:
+                        if any(getattr(r, "id", None) == getattr(role, "id", None) for r in getattr(g, "roles", [])):
+                            guild = g
+                            break
+                await AntiNukeService.on_guild_role_delete(role, guild=guild)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_guild_role_delete: {err}")
             await _dispatch_plugin_events("on_guild_role_delete", role)
@@ -308,6 +319,13 @@ class BotManager:
         async def on_guild_join(guild: discord.Guild):
             await _dispatch_plugin_events("on_guild_join", guild)
             await _dispatch_plugin_events("guild_join", guild)
+
+        @self.client.event
+        async def on_guild_remove(guild: discord.Guild):
+            from plugins.MomentumOneToolkit.events.guild_join import handle_guild_remove
+            handle_guild_remove(guild)
+            await _dispatch_plugin_events("on_guild_remove", guild)
+            await _dispatch_plugin_events("guild_remove", guild)
 
     async def setup(self) -> Dict[str, bool]:
         if self._is_setup:
@@ -467,14 +485,14 @@ class BotManager:
                 view_audit_log=True
             )
             me.guild_permissions = me_perms
-            top_role = discord.Role(id=999001, name="Sentinel™ Security", position=50)
+            top_role = discord.Role(id=999001, name="Sentinel™ Security", position=50, guild=guild)
             me.top_role = top_role
             guild.me = me
             guild.roles = [
-                discord.Role(id=gid, name="@everyone", position=0),
+                discord.Role(id=gid, name="@everyone", position=0, guild=guild),
                 top_role,
-                discord.Role(id=999002, name="Administrator", position=40),
-                discord.Role(id=999003, name="Moderator", position=30),
+                discord.Role(id=999002, name="Administrator", position=40, guild=guild),
+                discord.Role(id=999003, name="Moderator", position=30, guild=guild),
             ]
 
             # Default channels

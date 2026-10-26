@@ -290,12 +290,14 @@ class User(BaseItem):
         return Message()
 
 class Role(BaseItem):
-    def __init__(self, id: int = 0, name: str = "", position: int = 0):
+    def __init__(self, id: int = 0, name: str = "", position: int = 0, guild: Any = None):
         super().__init__(id, name)
         self.position = position
         self.permissions = Permissions()
         self.managed = False
         self.mention = f"<@&{id}>"
+        self.guild = guild
+        self._client = None
     def is_default(self): return self.position == 0
 
 class Member(User):
@@ -480,7 +482,8 @@ class Guild(BaseItem):
     async def create_role(self, name: str, **kwargs):
         r_id = max([r.id for r in self.roles], default=self.id * 10 + 100) + 1
         pos = kwargs.get("position", len(self.roles))
-        r = Role(id=r_id, name=name, position=pos)
+        r = Role(id=r_id, name=name, position=pos, guild=self)
+        r._client = getattr(self, "_client", None)
         self.roles.append(r)
         return r
 
@@ -489,7 +492,7 @@ class Guild(BaseItem):
         for r in self.roles:
             if r.id == self.id or r.name == "@everyone":
                 return r
-        return Role(id=self.id, name="@everyone", position=0)
+        return Role(id=self.id, name="@everyone", position=0, guild=self)
 
     async def kick(self, user, reason=None): pass
     async def ban(self, user, reason=None, delete_message_days=0): pass
@@ -772,15 +775,26 @@ class ui:
             self.style = style
             self.label = label
             self.emoji = emoji
-            self.custom_id = custom_id or self.custom_id
-            self.url = url
             self.disabled = disabled
             self.callback = None
+            is_link = (self.style == ButtonStyle.link or getattr(self.style, "value", None) == 5 or self.style == 5 or bool(url))
+            if is_link:
+                self.custom_id = None
+                self.url = str(url) if url is not None else None
+            else:
+                self.custom_id = custom_id or self.custom_id
+                self.url = None
+
         def to_dict(self):
-            d = {"type": 2, "style": self.style.value if hasattr(self.style, "value") else self.style, "disabled": self.disabled}
+            is_link = (self.style == ButtonStyle.link or getattr(self.style, "value", None) == 5 or self.style == 5 or bool(self.url))
+            style_val = 5 if is_link else (self.style.value if hasattr(self.style, "value") else self.style)
+            d = {"type": 2, "style": style_val, "disabled": self.disabled}
             if self.label: d["label"] = self.label
-            if self.custom_id: d["custom_id"] = self.custom_id
-            if self.url: d["url"] = self.url
+            if self.emoji: d["emoji"] = self.emoji.to_dict() if hasattr(self.emoji, "to_dict") else self.emoji
+            if is_link:
+                if self.url: d["url"] = self.url
+            else:
+                if self.custom_id: d["custom_id"] = self.custom_id
             return d
 
     class Select(Item):
@@ -981,6 +995,7 @@ class Client:
         self._last_heartbeat_sent: float = 0.0
         self._heartbeat_acked: bool = True
         self._intents_val: int = 3276799
+        self._initial_guild_ids: set[int] = set()
 
     def is_closed(self) -> bool:
         return self._closed
@@ -1071,8 +1086,15 @@ class Client:
             if d.get("resume_gateway_url"):
                 self._resume_gateway_url = f"{d['resume_gateway_url']}?v=10&encoding=json"
 
+            # Register initial guilds from READY packet so startup guilds never trigger welcome
+            for g_item in d.get("guilds", []):
+                if "id" in g_item:
+                    self._initial_guild_ids.add(int(g_item["id"]))
+
             # Fetch live guild list via REST
             await self._fetch_bot_guilds_rest()
+            for g in self.guilds:
+                self._initial_guild_ids.add(g.id)
 
             self._ready = True
             await self._dispatch_event("on_ready")
@@ -1085,12 +1107,14 @@ class Client:
         elif t == "GUILD_CREATE":
             gid = int(d["id"])
             existing = self.get_guild(gid)
+            is_initial = (gid in self._initial_guild_ids) or (not self._ready) or bool(d.get("unavailable", False))
             if existing:
                 guild = existing
                 guild.name = d.get("name", guild.name)
                 guild.icon = d.get("icon", guild.icon)
                 guild.member_count = d.get("member_count", guild.member_count)
                 guild.owner_id = int(d.get("owner_id", guild.owner_id or 0))
+                guild.unavailable = False
             else:
                 guild = Guild(id=gid, name=d.get("name", f"Guild {gid}"))
                 guild.icon = d.get("icon")
@@ -1130,7 +1154,8 @@ class Client:
             guild.roles = []
             for r_data in d.get("roles", []):
                 r_id = int(r_data["id"])
-                role = Role(id=r_id, name=r_data.get("name", ""), position=r_data.get("position", 0))
+                role = Role(id=r_id, name=r_data.get("name", ""), position=r_data.get("position", 0), guild=guild)
+                role._client = self
                 guild.roles.append(role)
 
             # Bot member
@@ -1138,7 +1163,9 @@ class Client:
             me.bot = True
             guild.me = me
 
-            await self._dispatch_event("on_guild_join", guild)
+            # Dispatch on_guild_join ONLY on genuine new guild joins (never on startup or existing guilds)
+            if not is_initial and existing is None:
+                await self._dispatch_event("on_guild_join", guild)
 
         elif t == "GUILD_DELETE":
             gid = int(d["id"])
@@ -1146,7 +1173,8 @@ class Client:
                 removed = self.get_guild(gid)
                 if removed:
                     self.guilds = [g for g in self.guilds if g.id != gid]
-                    await self._dispatch_event("on_guild_remove", removed)
+                self._initial_guild_ids.discard(gid)
+                await self._dispatch_event("on_guild_remove", removed or Guild(id=gid))
 
         elif t == "GUILD_UPDATE":
             gid = int(d["id"])
@@ -1286,8 +1314,9 @@ class Client:
 
         elif t == "GUILD_ROLE_CREATE":
             r_data = d.get("role", {})
-            role = Role(id=int(r_data.get("id", 0)), name=r_data.get("name", ""), position=r_data.get("position", 0))
             guild = self.get_guild(int(d.get("guild_id", 0)))
+            role = Role(id=int(r_data.get("id", 0)), name=r_data.get("name", ""), position=r_data.get("position", 0), guild=guild)
+            role._client = self
             if guild:
                 guild.roles.append(role)
             await self._dispatch_event("on_guild_role_create", role)
@@ -1295,14 +1324,18 @@ class Client:
         elif t == "GUILD_ROLE_DELETE":
             rid = int(d.get("role_id", 0))
             guild = self.get_guild(int(d.get("guild_id", 0)))
-            role = (guild.get_role(rid) if guild else None) or Role(id=rid)
+            role = (guild.get_role(rid) if guild else None) or Role(id=rid, guild=guild)
+            role.guild = guild
+            role._client = self
             if guild:
                 guild.roles = [r for r in guild.roles if r.id != rid]
             await self._dispatch_event("on_guild_role_delete", role)
 
         elif t == "GUILD_ROLE_UPDATE":
             r_data = d.get("role", {})
-            role = Role(id=int(r_data.get("id", 0)), name=r_data.get("name", ""), position=r_data.get("position", 0))
+            guild = self.get_guild(int(d.get("guild_id", 0)))
+            role = Role(id=int(r_data.get("id", 0)), name=r_data.get("name", ""), position=r_data.get("position", 0), guild=guild)
+            role._client = self
             await self._dispatch_event("on_guild_role_update", role, role)
 
         elif t == "WEBHOOKS_UPDATE":

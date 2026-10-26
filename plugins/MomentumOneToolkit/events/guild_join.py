@@ -22,6 +22,14 @@ category = "general"
 _processed_guilds: Set[int] = set()
 
 
+def handle_guild_remove(guild: Any) -> None:
+    """Resets deduplication state when Sentinel departs a guild, ensuring future legitimate joins are welcomed."""
+    gid = getattr(guild, "id", None) if not isinstance(guild, int) else guild
+    if gid is not None:
+        _processed_guilds.discard(int(gid))
+        logger.debug(f"[GuildJoin] Cleared join deduplication for departed guild {gid}")
+
+
 def _get_invite_url(client_id: Optional[str | int]) -> str:
     cid = client_id or settings.CLIENT_ID or "1563628961379123302"
     return f"https://discord.com/oauth2/authorize?client_id={cid}&permissions=8&scope=bot%20applications.commands"
