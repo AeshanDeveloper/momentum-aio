@@ -378,7 +378,28 @@ class BotManager:
         except Exception as err:
             logger.debug(f"[BotManager] Guild sync database query: {err}")
 
-        # 3. Ensure the 3 primary Sentinel production servers exist if fewer than 3 guilds
+        has_real_token = bool(
+            settings.BOT_TOKEN
+            and len(settings.BOT_TOKEN.strip()) > 20
+            and not settings.BOT_TOKEN.strip().startswith("sentinel_")
+        )
+
+        # In real Discord mode, strictly retain live Discord guilds and do not inject mock guilds
+        if has_real_token:
+            for guild in self.client.guilds:
+                gid_str = str(guild.id)
+                if gid_str not in AntiNukeManager._guild_configs:
+                    AntiNukeManager._guild_configs[gid_str] = {
+                        "guild_id": gid_str,
+                        "guild_name": guild.name,
+                        "setup_completed": True,
+                        "enabled": True,
+                        "mode": "hard",
+                        "monitored_events": list(AntiNukeConstants.ALL_EVENTS),
+                    }
+            return
+
+        # 3. In local / standalone simulation mode, ensure the 3 default Sentinel production servers exist
         default_sentinel_guilds = [
             {
                 "guild_id": "987654321",
@@ -413,7 +434,7 @@ class BotManager:
                     "monitored_events": list(AntiNukeConstants.ALL_EVENTS),
                 }
 
-        # 4. Create and populate discord.Guild objects in self.client.guilds
+        # 4. Create and populate discord.Guild objects in self.client.guilds (mock / local mode)
         for gid_str, g_data in guild_sources.items():
             if gid_str in existing_ids:
                 continue

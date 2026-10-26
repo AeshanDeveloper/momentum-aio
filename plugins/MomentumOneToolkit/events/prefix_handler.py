@@ -25,7 +25,6 @@ _processed_messages: set[int] = set()
 
 async def execute(ctx: Any, message: discord.Message):
     try:
-        print("1")
         if not message.author or message.author.bot:
             return
 
@@ -77,7 +76,7 @@ async def execute(ctx: Any, message: discord.Message):
         found_command = commands_registry.get(command_name)
         if not found_command or found_command.status != CommandStatus.ACTIVE or not found_command.enabled:
             return
-        print("2")
+
         # 3. Anti-Spam Check
         spam_result = AntiSpamService.check(str(message.author.id))
         if not spam_result.get("allowed"):
