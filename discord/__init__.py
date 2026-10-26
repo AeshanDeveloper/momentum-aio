@@ -211,6 +211,10 @@ class HTTPException(DiscordException):
 class Forbidden(HTTPException): pass
 class NotFound(HTTPException): pass
 class InvalidArgument(ClientException): pass
+class RateLimited(HTTPException):
+    def __init__(self, retry_after: float = 2.0):
+        self.retry_after = retry_after
+        super().__init__(message=f"Rate limited. Retry after {retry_after}s")
 
 class MessageFlags:
     def __init__(self, value: int = 0):

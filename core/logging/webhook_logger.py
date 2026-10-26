@@ -106,11 +106,18 @@ class UnifiedWebhookLogger:
             return True
 
     @classmethod
-    async def release_setup_lock(cls, guild_id: str | int) -> None:
-        """Releases the setup lock for a guild."""
+    def release_setup_lock(cls, guild_id: str | int) -> Any:
+        """Releases the setup lock for a guild. Supports both sync and await syntax."""
         gid = str(guild_id)
-        async with cls._SETUP_LOCK:
-            cls._ACTIVE_SETUP_SERVERS.discard(gid)
+        cls._ACTIVE_SETUP_SERVERS.discard(gid)
+
+        class _LockReleaseAwaitable:
+            def __await__(self):
+                async def _noop():
+                    pass
+                return _noop().__await__()
+
+        return _LockReleaseAwaitable()
 
     @classmethod
     def is_setup_in_progress(cls, guild_id: str | int) -> bool:
@@ -439,18 +446,33 @@ class UnifiedWebhookLogger:
             )
             return False
 
-        embed = cls.build_log_embed(
-            guild=guild,
-            category=category,
-            title=title,
-            description=description,
-            actor=actor,
-            target=target,
-            reason=reason,
-            fields=fields,
-            severity=severity,
-            timestamp=timestamp,
-        )
+        if isinstance(title, dict):
+            p_dict = title
+            embed = cls.build_log_embed(
+                guild=guild,
+                category=category,
+                title=str(p_dict.get("title", description or "Event Log")),
+                description=str(p_dict.get("description", description or "")),
+                actor=actor or p_dict.get("actor"),
+                target=target or p_dict.get("target"),
+                reason=reason or p_dict.get("reason"),
+                fields=fields or p_dict.get("fields"),
+                severity=severity or p_dict.get("severity"),
+                timestamp=timestamp or p_dict.get("timestamp"),
+            )
+        else:
+            embed = cls.build_log_embed(
+                guild=guild,
+                category=category,
+                title=title,
+                description=description,
+                actor=actor,
+                target=target,
+                reason=reason,
+                fields=fields,
+                severity=severity,
+                timestamp=timestamp,
+            )
 
         payload = {
             "username": f"{settings.BOT_NAME} Security & Event Logger",
@@ -697,15 +719,26 @@ class UnifiedWebhookLogger:
             # Check previously configured category ID
             saved_cat_id = cfg.get("category_id")
             if saved_cat_id:
-                ch = guild.get_channel(int(saved_cat_id))
-                if isinstance(ch, discord.CategoryChannel):
-                    target_cat = ch
-                    reused_category = True
+                for c in (guild.categories or []):
+                    if str(getattr(c, "id", "")) == str(saved_cat_id):
+                        target_cat = c
+                        reused_category = True
+                        break
+                if not target_cat:
+                    ch = guild.get_channel(int(saved_cat_id))
+                    if isinstance(ch, discord.CategoryChannel):
+                        target_cat = ch
+                        reused_category = True
 
-            # If not found by ID, inspect guild categories by name
+            # If not found by ID, inspect guild categories by name or pattern
             if not target_cat:
-                for c in guild.categories:
-                    if c.name.strip().lower() == cat_label.strip().lower():
+                for c in (guild.categories or []):
+                    c_name_lower = getattr(c, "name", "").strip().lower()
+                    if (
+                        c_name_lower == cat_label.strip().lower()
+                        or c_name_lower in ("momentumone logs", "sentinel logs", "sentinel™ logs")
+                        or c_name_lower.endswith(" logs")
+                    ):
                         target_cat = c
                         reused_category = True
                         break
@@ -871,23 +904,23 @@ class UnifiedWebhookLogger:
             try:
                 wh_list = await target_ch.webhooks()
                 # Find bot's own webhook or logger webhook
-                target_wh = next((w for w in wh_list if (w.user and w.user.id == me.id) or w.name.startswith(settings.BOT_NAME)), None)
+                target_wh = next((w for w in wh_list if (getattr(w, "user", None) and getattr(w.user, "id", None) == me.id) or (getattr(w, "name", "") or "").startswith(settings.BOT_NAME) or (getattr(w, "name", "") or "").startswith("MomentumOne") or (getattr(w, "name", "") or "").startswith("Sentinel")), None)
                 if not target_wh and wh_list:
-                    target_wh = next((w for w in wh_list if w.url), None)
+                    target_wh = next((w for w in wh_list if getattr(w, "url", None)), None)
 
                 if not target_wh:
                     await asyncio.sleep(0.5)
                     target_wh = await target_ch.create_webhook(
                         name=f"{settings.BOT_NAME} Logger",
-                        reason="MomentumOne Unified Logging Webhook",
+                        reason=f"{settings.BOT_NAME} Unified Logging Webhook",
                     )
-            except discord.RateLimited as rle:
+            except getattr(discord, "RateLimited", Exception) as rle:
                 wait_sec = getattr(rle, "retry_after", 2.0)
                 await report(f"Webhook rate limit. Waiting {wait_sec:.1f}s…")
                 await asyncio.sleep(wait_sec + 0.5)
                 target_wh = await target_ch.create_webhook(
                     name=f"{settings.BOT_NAME} Logger",
-                    reason="MomentumOne Unified Logging Webhook",
+                    reason=f"{settings.BOT_NAME} Unified Logging Webhook",
                 )
             except Exception as err:
                 errors.append(f"Webhook error in `#{target_ch.name}`: {redact_webhook_credentials(str(err))}")
@@ -920,6 +953,7 @@ class UnifiedWebhookLogger:
         success = len(all_channels) > 0 and len(new_destinations) > 0
 
         return {
+            "status": "success" if success else "error",
             "success": success,
             "category": target_cat,
             "created_category": created_category,
@@ -968,26 +1002,35 @@ class UnifiedWebhookLogger:
 
             if isinstance(ch, discord.TextChannel):
                 # Verify channel ownership to protect non-logging channels
+                cat_obj = getattr(ch, "category", None)
+                topic_str = getattr(ch, "topic", "") or ""
+                topic_lower = topic_str.lower()
                 is_logging_ch = (
-                    "Unified Audit" in (ch.topic or "")
-                    or "Logging" in (ch.topic or "")
-                    or (ch.category and str(ch.category.id) == str(cfg.get("category_id")))
+                    "unified audit" in topic_lower
+                    or "logging" in topic_lower
+                    or "logs" in topic_lower
+                    or "webhook" in topic_lower
+                    or "momentumone" in topic_lower
+                    or "sentinel" in topic_lower
+                    or (cat_obj and str(cat_obj.id) == str(cfg.get("category_id")))
                 )
 
                 if is_logging_ch and me and getattr(me.guild_permissions, "manage_webhooks", False):
                     try:
                         whs = await ch.webhooks()
                         for wh in whs:
-                            if (wh.user and wh.user.id == me.id) or wh.name.startswith(settings.BOT_NAME):
-                                await wh.delete(reason="MomentumOne Logging Resource Decommission")
-                                deleted_webhooks.append(wh.name)
+                            wh_user = getattr(wh, "user", None)
+                            wh_name = getattr(wh, "name", "") or ""
+                            if (wh_user and getattr(wh_user, "id", None) == me.id) or wh_name.startswith(settings.BOT_NAME) or wh_name.startswith("MomentumOne") or wh_name.startswith("Sentinel"):
+                                await wh.delete(reason=f"{settings.BOT_NAME} Logging Resource Decommission")
+                                deleted_webhooks.append(wh_name)
                     except Exception as err:
                         errors.append(f"Webhook deletion error in <#{cid}>: {redact_webhook_credentials(str(err))}")
 
                 if delete_from_discord and is_logging_ch and me and getattr(me.guild_permissions, "manage_channels", False):
                     try:
-                        ch_name = ch.name
-                        await ch.delete(reason="MomentumOne Logging Resource Decommission")
+                        ch_name = getattr(ch, "name", f"channel-{cid}")
+                        await ch.delete(reason=f"{settings.BOT_NAME} Logging Resource Decommission")
                         deleted_channels.append(ch_name)
                     except Exception as err:
                         errors.append(f"Channel deletion error for <#{cid}>: {redact_webhook_credentials(str(err))}")
@@ -1003,13 +1046,21 @@ class UnifiedWebhookLogger:
         deleted_cat = False
         cat_id = cfg.get("category_id")
         if delete_category and cat_id:
-            cat = guild.get_channel(int(cat_id))
-            if isinstance(cat, discord.CategoryChannel) and me and getattr(me.guild_permissions, "manage_channels", False):
+            cat = None
+            for c in (guild.categories or []):
+                if str(getattr(c, "id", "")) == str(cat_id):
+                    cat = c
+                    break
+            if not cat:
+                cat = guild.get_channel(int(cat_id))
+
+            if cat and me and getattr(me.guild_permissions, "manage_channels", False):
                 # Ensure category is empty or only contained logging channels
-                remaining = [c for c in cat.channels if str(c.id) not in managed_ch_ids]
+                cat_channels = getattr(cat, "channels", []) or []
+                remaining = [c for c in cat_channels if str(getattr(c, "id", "")) not in managed_ch_ids]
                 if not remaining:
                     try:
-                        await cat.delete(reason="MomentumOne Logging Category Decommission")
+                        await cat.delete(reason=f"{settings.BOT_NAME} Logging Category Decommission")
                         deleted_cat = True
                     except Exception as err:
                         errors.append(f"Category deletion error: {redact_webhook_credentials(str(err))}")

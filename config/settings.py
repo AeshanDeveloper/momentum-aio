@@ -14,7 +14,7 @@ class Settings:
     API_SECRET: str = os.getenv("API_SECRET", "")
     ENVIRONMENT: str = os.getenv("NODE_ENV", "production")
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", 3000))
+    PORT: int = int(os.getenv("API_PORT", 3000))
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
     
     # Database
@@ -86,8 +86,8 @@ COLORS: Dict[str, str] = AuthoritativeDict("ColorsConfig", _raw_colors)
 EMOJIS: Dict[str, str] = AuthoritativeDict("EmojisConfig", _raw_emojis)
 IMAGES: Dict[str, str] = AuthoritativeDict("ImagesConfig", _raw_images)
 
-SENTINEL_AVATAR: str = "https://cdn.discordapp.com/avatars/1563628961379123302/d4a0d1341e7059c11b863f2a3a74dd75.png?size=512"
-SENTINEL_EMOJI: str = "<:sentinel:1563641257073442926>"
+SENTINEL_AVATAR: str = IMAGES.get("sentinel_avatar", IMAGES.get("avatar", "https://cdn.discordapp.com/avatars/1563628961379123302/d4a0d1341e7059c11b863f2a3a74dd75.png?size=512"))
+SENTINEL_EMOJI: str = EMOJIS.get("sentinel", "<:sentinel:1563641257073442926>")
 
 def get_color(key: str, default: str = "#0844C5") -> str:
     return COLORS.get(key, default) or default

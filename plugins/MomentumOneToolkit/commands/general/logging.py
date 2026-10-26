@@ -424,7 +424,15 @@ async def build_wizard_preview_view(guild: discord.Guild) -> Any:
     if cfg.get("category_id"):
         existing_cat = discord.utils.get(guild.categories, id=int(cfg["category_id"]))
     if not existing_cat and mode == "category":
-        existing_cat = discord.utils.find(lambda c: c.name.lower() == cat_name.lower(), guild.categories)
+        for c in (guild.categories or []):
+            c_name_lower = getattr(c, "name", "").strip().lower()
+            if (
+                c_name_lower == cat_name.strip().lower()
+                or c_name_lower in ("momentumone logs", "sentinel logs", "sentinel™ logs")
+                or c_name_lower.endswith(" logs")
+            ):
+                existing_cat = c
+                break
 
     category_status = (
         f"• **Target Category:** `📁 {existing_cat.name}` *(Existing category will be reused ✅)*"

@@ -1,5 +1,6 @@
 from typing import Any
 import discord
+from sdk.event import Event
 from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
 from core.logging.logger import logger
 
@@ -7,28 +8,32 @@ name = "on_member_remove"
 description = "Dedicated logging listener for member remove / leave / kick"
 category = "logging"
 
-async def execute(ctx: Any, member: discord.Member) -> None:
-    guild = getattr(member, "guild", None)
-    if not guild:
+async def execute(*args, **kwargs) -> None:
+    member = args[-1] if args else kwargs.get("member")
+    guild = getattr(member, "guild", None) if member else None
+    if not guild or not member:
         return
     try:
-        # Check if this was a kick via audit log
+        audit_action = getattr(discord.AuditLogAction, "kick", getattr(discord.AuditLogAction, "member_kick", None))
         actor, reason = await UnifiedWebhookLogger.fetch_audit_attribution(
-            guild, discord.AuditLogAction.kick, target_id=member.id
+            guild, audit_action, target_id=member.id
         )
 
         is_kick = actor is not None
         title = "Member Kicked" if is_kick else "Member Left"
         severity = LogSeverity.HIGH if is_kick else LogSeverity.INFO
+        m_tag = str(member)
+        m_mention = getattr(member, "mention", m_tag)
         desc = (
-            f"Member {member.mention} (**{member}**) was kicked from the server."
+            f"Member {m_mention} (**{m_tag}**) was kicked from the server."
             if is_kick
-            else f"Member **{member}** left the server."
+            else f"Member **{m_tag}** left the server."
         )
 
+        m_count = getattr(guild, "member_count", "N/A")
         fields = [
             {"name": "User ID", "value": f"`{member.id}`", "inline": True},
-            {"name": "Remaining Members", "value": f"`{guild.member_count}`", "inline": True},
+            {"name": "Remaining Members", "value": f"`{m_count}`", "inline": True},
         ]
         if is_kick:
             fields.append({"name": "Moderation Action", "value": "`KICK`", "inline": True})
@@ -48,3 +53,20 @@ async def execute(ctx: Any, member: discord.Member) -> None:
         )
     except Exception as err:
         logger.error(f"[LoggingEvent:member_remove] Failed to dispatch member remove log: {err}")
+
+
+class MemberRemoveLoggingEvent(Event):
+    def __init__(self, bot: Any = None):
+        super().__init__(
+            name=name,
+            execute=self.execute,
+            description=description,
+            category=category,
+        )
+        self.bot = bot
+
+    async def execute(self, *args, **kwargs):
+        return await execute(*args, **kwargs)
+
+
+event = MemberRemoveLoggingEvent

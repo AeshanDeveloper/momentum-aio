@@ -132,7 +132,7 @@ class ApiServer:
     async def start(self) -> None:
         runner = web.AppRunner(self.app)
         await runner.setup()
-        base_port = int(os.getenv("API_PORT", os.getenv("PORT", 3000)))
+        base_port = int(os.getenv("API_PORT", 3000))
         host = settings.HOST
         for offset in range(10):
             target_port = base_port + offset

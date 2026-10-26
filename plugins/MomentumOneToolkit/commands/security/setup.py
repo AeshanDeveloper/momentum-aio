@@ -112,12 +112,14 @@ async def build_wizard_step1_view(guild: discord.Guild) -> Any:
 
     dangerous_roles = []
     for r in guild.roles:
-        if r.is_default() or r.managed:
+        if r.is_default() or getattr(r, "managed", False):
             continue
         held_dangerous = []
-        for p_key, p_name in AntiNukeConstants.DANGEROUS_PERMISSIONS.items():
-            if getattr(r.permissions, p_key, False):
-                held_dangerous.append(p_name)
+        r_perms = getattr(r, "permissions", None)
+        if r_perms:
+            for p_key, p_name in AntiNukeConstants.DANGEROUS_PERMISSIONS.items():
+                if getattr(r_perms, p_key, False):
+                    held_dangerous.append(p_name)
         if held_dangerous:
             dangerous_roles.append((r, held_dangerous))
 

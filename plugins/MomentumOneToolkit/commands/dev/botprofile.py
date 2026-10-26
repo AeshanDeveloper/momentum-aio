@@ -14,7 +14,7 @@ from sdk.discord.builders import (
 )
 from sdk.discord.response import send_response, send_ui
 from discord import MessageFlags, ButtonStyle
-import config;
+from config.settings import settings
 
 name = "botprofile"
 aliases = ["botpfp", "botname", "botbio", "serverprofile"]

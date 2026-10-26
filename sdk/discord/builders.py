@@ -541,6 +541,16 @@ class ContainerBuilder:
         self._timeout = float(timeout)
         return self
 
+    def add_thumbnail(self, url: Optional[str] = None) -> ContainerBuilder:
+        from config.settings import IMAGES
+        target_url = url or IMAGES.get("thumbnail", IMAGES.get("avatar", ""))
+        if target_url and hasattr(discord.ui, "Thumbnail"):
+            self._components.append(discord.ui.Thumbnail(str(target_url)))
+        return self
+
+    def set_thumbnail(self, url: Optional[str] = None) -> ContainerBuilder:
+        return self.add_thumbnail(url)
+
     def add_action_row(self, row_or_fn: Any) -> ContainerBuilder:
         if callable(row_or_fn):
             row = row_or_fn(ActionRowBuilder())
