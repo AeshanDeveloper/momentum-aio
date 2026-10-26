@@ -217,7 +217,7 @@ async def build_logging_panel_view(guild: discord.Guild) -> Any:
     return (
         ContainerBuilder()
         .set_accent_color(accent)
-        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} MomentumOne Unified Webhook Logging System")
+        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} {settings.BOT_NAME} Unified Webhook Logging System")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_text_display(summary_text)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)

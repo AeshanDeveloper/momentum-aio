@@ -1,8 +1,6 @@
 import os
 import sys
 import asyncio
-from dotenv import load_dotenv
-
 # Add python directory and root to sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
@@ -11,7 +9,24 @@ if BASE_DIR not in sys.path:
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    for env_path in [os.path.join(BASE_DIR, ".env"), os.path.join(BASE_DIR, ".env.example")]:
+        if os.path.isfile(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k, v = k.strip(), v.strip().strip('"').strip("'")
+                            if k not in os.environ:
+                                os.environ[k] = v
+            except Exception:
+                pass
+
 
 from config.settings import settings
 from config.strings import get_string

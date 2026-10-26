@@ -33,8 +33,7 @@ async def execute(ctx: Any, command_type: Any, message: Any, args: List[str] = N
     client = getattr(ctx, "client", getattr(message, "client", None))
     guild = getattr(message, "guild", None)
 
-    bot_cfg = getattr(config, "settings", {}).get("bot", {}) if isinstance(getattr(config, "settings", {}), dict) else {}
-    owner_ids = [str(o) for o in (bot_cfg.get("owner_ids") or [getattr(config, "OWNER_ID", "")])]
+    owner_ids = [str(o) for o in (getattr(settings, "OWNER_IDS", []) or [])]
 
     E = EMOJIS
     C = COLORS

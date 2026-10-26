@@ -347,11 +347,13 @@ class BotManager:
             logger.info("[BOT] Discord bot token (BOT_TOKEN) is not configured. Running offline.")
             return
 
-        if self._is_starting or self.client.is_ready():
+        is_ready = self.client.is_ready() if hasattr(self.client, "is_ready") else False
+        if self._is_starting or is_ready:
             logger.warn("[BOT] Discord client start() called while already connecting or ready.")
             return
 
-        if self.client.is_closed():
+        is_closed = self.client.is_closed() if hasattr(self.client, "is_closed") else False
+        if is_closed:
             self._recreate_client()
 
         if not self._is_setup:
@@ -398,5 +400,6 @@ class BotManager:
         self._is_starting = False
         self._is_ready = False
         self._started_at = None
-        if not self.client.is_closed():
+        is_closed = self.client.is_closed() if hasattr(self.client, "is_closed") else False
+        if not is_closed and hasattr(self.client, "close"):
             await self.client.close()

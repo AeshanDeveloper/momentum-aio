@@ -234,6 +234,8 @@ class User(BaseItem):
         self.bot = bot
         self.discriminator = "0000"
         self.mention = f"<@{id}>"
+    def __str__(self):
+        return self.name or f"User#{self.discriminator}"
     async def send(self, *args, **kwargs):
         return Message()
 
@@ -570,24 +572,65 @@ class Client:
         self.user = User(id=1563628961379123302, name="Sentinel™", bot=True)
         self.guilds: List[Guild] = []
         self._event_hooks: Dict[str, List[Callable]] = {}
+        self._closed: bool = False
+        self._ready: bool = False
+        self.latency: float = 0.025
+
+    def is_closed(self) -> bool:
+        return self._closed
+
+    def is_ready(self) -> bool:
+        return self._ready
+
     def event(self, coro: Callable):
         name = coro.__name__
         if name not in self._event_hooks:
             self._event_hooks[name] = []
         self._event_hooks[name].append(coro)
         return coro
+
     async def start(self, token: str):
-        pass
+        self._closed = False
+        self._ready = True
+        if "on_ready" in self._event_hooks:
+            for hook in self._event_hooks["on_ready"]:
+                try:
+                    res = hook()
+                    if hasattr(res, "__await__"):
+                        await res
+                except Exception:
+                    pass
+
     async def close(self):
+        self._closed = True
+        self._ready = False
+
+    async def wait_until_ready(self):
+        while not self._ready:
+            await asyncio.sleep(0.05)
+
+    async def change_presence(self, *args, **kwargs):
         pass
+
     def get_guild(self, guild_id: int):
         for g in self.guilds:
             if g.id == guild_id: return g
         return None
+
     def get_channel(self, channel_id: int):
         for g in self.guilds:
             c = g.get_channel(channel_id)
             if c: return c
         return None
+
     def get_user(self, user_id: int):
         return None
+
+    async def fetch_user(self, user_id: int):
+        return User(id=user_id, name=f"User_{user_id}")
+
+    async def fetch_channel(self, channel_id: int):
+        return self.get_channel(channel_id) or TextChannel(id=channel_id)
+
+    async def fetch_guild(self, guild_id: int):
+        return self.get_guild(guild_id) or Guild(id=guild_id)
