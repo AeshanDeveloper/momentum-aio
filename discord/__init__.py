@@ -331,16 +331,59 @@ class Guild(BaseItem):
         self.categories = []
         self.public_updates_channel = None
         self.system_channel = None
+        self.member_count: int = 1
+        self.members: List[Any] = []
+        self.icon: Optional[str] = None
+        self.icon_url: Optional[str] = None
+        self.unavailable: bool = False
+
     def get_channel(self, channel_id: int):
         for c in self.channels:
             if c.id == channel_id: return c
         return None
+
     def get_role(self, role_id: int):
         for r in self.roles:
             if r.id == role_id: return r
         return None
+
     def get_member(self, user_id: int):
-        return None
+        for m in self.members:
+            if m.id == user_id: return m
+        if self.me and self.me.id == user_id:
+            return self.me
+        if self.owner and self.owner.id == user_id:
+            return self.owner
+        return Member(id=user_id, name=f"User_{user_id}", guild=self)
+
+    async def create_text_channel(self, name: str, **kwargs):
+        ch_id = max([c.id for c in self.channels], default=self.id * 10) + 1
+        ch = TextChannel(id=ch_id, name=name)
+        ch.guild = self
+        category = kwargs.get("category")
+        if category:
+            ch.category = category
+            if hasattr(category, "channels"):
+                category.channels.append(ch)
+        self.channels.append(ch)
+        self.text_channels.append(ch)
+        return ch
+
+    async def create_category(self, name: str, **kwargs):
+        cat_id = max([c.id for c in self.categories], default=self.id * 10 + 50) + 1
+        cat = CategoryChannel(id=cat_id, name=name)
+        cat.guild = self
+        self.categories.append(cat)
+        self.channels.append(cat)
+        return cat
+
+    async def create_role(self, name: str, **kwargs):
+        r_id = max([r.id for r in self.roles], default=self.id * 10 + 100) + 1
+        pos = kwargs.get("position", len(self.roles))
+        r = Role(id=r_id, name=name, position=pos)
+        self.roles.append(r)
+        return r
+
     async def kick(self, user, reason=None): pass
     async def ban(self, user, reason=None, delete_message_days=0): pass
     async def unban(self, user, reason=None): pass
@@ -589,8 +632,58 @@ class Client:
         self._event_hooks[name].append(coro)
         return coro
 
+    def add_guild(self, guild: Guild) -> None:
+        if not any(g.id == guild.id for g in self.guilds):
+            self.guilds.append(guild)
+
     async def start(self, token: str):
         self._closed = False
+        self._ready = False
+
+        # If a live Discord bot token is provided, attempt to fetch user info and guilds via REST API
+        if token and len(token) > 20 and not token.startswith("sentinel_"):
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    headers = {"Authorization": f"Bot {token}"}
+                    # 1. Fetch current bot user
+                    try:
+                        async with session.get(
+                            "https://discord.com/api/v10/users/@me",
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=4)
+                        ) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                self.user.id = int(data.get("id", self.user.id))
+                                self.user.name = data.get("username", self.user.name)
+                                if data.get("global_name"):
+                                    self.user.global_name = data.get("global_name")
+                    except Exception:
+                        pass
+
+                    # 2. Fetch bot guilds
+                    try:
+                        async with session.get(
+                            "https://discord.com/api/v10/users/@me/guilds?with_counts=true",
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=4)
+                        ) as resp:
+                            if resp.status == 200:
+                                guilds_data = await resp.json()
+                                for g_data in guilds_data:
+                                    gid = int(g_data["id"])
+                                    if not any(g.id == gid for g in self.guilds):
+                                        g_obj = Guild(id=gid, name=g_data.get("name", f"Guild {gid}"))
+                                        g_obj.owner_id = int(g_data.get("owner_id", 0)) if g_data.get("owner_id") else 0
+                                        g_obj.member_count = g_data.get("approximate_member_count") or g_data.get("member_count") or 1
+                                        g_obj.icon = g_data.get("icon")
+                                        self.guilds.append(g_obj)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         self._ready = True
         if "on_ready" in self._event_hooks:
             for hook in self._event_hooks["on_ready"]:

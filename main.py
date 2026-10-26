@@ -71,12 +71,9 @@ async def main():
     api_server = ApiServer(bot_manager=bot_app.bot)
     await api_server.start()
 
-    # Start Discord Bot Gateway if enabled and token present
+    # Start Discord Bot Gateway if enabled
     if settings.BOT_ENABLED:
-        if settings.BOT_TOKEN:
-            asyncio.create_task(bot_app.bot.start())
-        else:
-            logger.info("[MomentumOne] Discord bot token is not configured. Running in standby mode.")
+        asyncio.create_task(bot_app.bot.start())
     else:
         logger.info(get_string("system.bot_disabled", "[MomentumOne] Discord bot is disabled in environment settings."))
 

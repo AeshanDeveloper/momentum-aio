@@ -82,14 +82,16 @@ async def handle_auth_routes(request: web.Request, bot_manager: Any = None) -> O
         if bot_manager and hasattr(bot_manager, "client") and bot_manager.client.is_ready():
             for g in bot_manager.client.guilds:
                 if not any(x.get("id") == str(g.id) for x in guilds):
+                    icon_val = str(g.icon.url) if hasattr(g.icon, "url") else (str(g.icon) if g.icon else None)
+                    m_count = getattr(g, "member_count", 0) or len(getattr(g, "members", [])) or 100
                     guilds.append({
                         "id": str(g.id),
                         "name": g.name,
-                        "icon": str(g.icon.url) if g.icon else None,
+                        "icon": icon_val,
                         "owner": False,
                         "permissions": 8,
                         "botPresent": True,
-                        "memberCount": g.member_count or len(g.members)
+                        "memberCount": m_count
                     })
 
         return web.json_response({"guilds": guilds})
