@@ -421,6 +421,33 @@ class ComponentLayoutView(discord.ui.LayoutView):
     def to_dict(self) -> Dict[str, Any]:
         return {}
 
+    def __str__(self) -> str:
+        parts: List[str] = []
+        def _extract(obj: Any):
+            if isinstance(obj, (list, tuple)):
+                for item in obj:
+                    _extract(item)
+            elif isinstance(obj, dict):
+                for val in obj.values():
+                    _extract(val)
+            else:
+                for attr in ("content", "text", "label", "placeholder"):
+                    val = getattr(obj, attr, None)
+                    if val:
+                        parts.append(str(val))
+                comps = getattr(obj, "components", None) or getattr(obj, "children", None)
+                if comps and comps != obj:
+                    for c in comps:
+                        _extract(c)
+                opts = getattr(obj, "options", None)
+                if opts:
+                    for o in opts:
+                        _extract(o)
+        for c in self.children:
+            _extract(c)
+        return "\n".join(parts) if parts else super().__str__()
+
+
     def get_interactive_components(self) -> List[Any]:
         items = []
         for child in self.children:

@@ -34,14 +34,12 @@ def get_webhook_display_status(guild: Optional[discord.Guild], dest: Optional[Di
         return "Missing"
     cid = dest.get("channel_id")
     wh_url = dest.get("webhook_url")
-    if not cid:
+    if not cid or not wh_url:
         return "Missing"
     if guild:
         ch = guild.get_channel(int(cid))
         if not ch or not isinstance(ch, discord.TextChannel):
             return "Needs Repair"
-    if not wh_url:
-        return "Needs Repair"
     return "Configured"
 
 

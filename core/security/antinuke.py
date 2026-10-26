@@ -536,7 +536,7 @@ class AntiNukeManager:
             "setup_completed": False,
             "enabled": False,
             "mode": default_mode,
-            "monitored_events": list(AntiNukeConstants.ALL_EVENTS),
+            "monitored_events": list(AntiNukeConstants.USER_CONFIGURABLE_EVENTS),
             "extra_owners": [],
             "whitelists": {},  # entity_id (str) -> {"type": "user"|"role"|"channel"|"category", "name": str, "events": list[str]}
             "ticket_bots": [],  # list of bot user IDs exempt from ticket channel operations
@@ -570,7 +570,7 @@ class AntiNukeManager:
         return cfg
 
     @classmethod
-    def is_owner_or_extra_owner(cls, guild: discord.Guild, user_id: int | str) -> bool:
+    def is_owner_or_extra_owner(cls, guild: discord.Guild, user_id: int | str, allow_admin: bool = False) -> bool:
         """Validates if user is Server Owner, Bot Owner, or configured Extra Owner."""
         uid_str = str(user_id)
         if guild and guild.owner_id and str(guild.owner_id) == uid_str:
@@ -581,6 +581,32 @@ class AntiNukeManager:
             cfg = cls.get_guild_config(str(guild.id))
             if uid_str in [str(x) for x in cfg.get("extra_owners", [])]:
                 return True
+            if allow_admin and hasattr(guild, "get_member"):
+                try:
+                    m = guild.get_member(int(uid_str))
+                    if m and getattr(m.guild_permissions, "administrator", False):
+                        return True
+                except Exception:
+                    pass
+        return False
+
+    @classmethod
+    def is_authorized_manager(cls, guild: discord.Guild, user: Any) -> bool:
+        """Checks if an entity is Server Owner, Bot Owner, Extra Owner, or Guild Administrator."""
+        if not user:
+            return False
+        uid = getattr(user, "id", user)
+        if cls.is_owner_or_extra_owner(guild, uid):
+            return True
+        if isinstance(user, discord.Member):
+            return getattr(user.guild_permissions, "administrator", False)
+        if guild and hasattr(guild, "get_member"):
+            try:
+                m = guild.get_member(int(uid))
+                if m:
+                    return getattr(m.guild_permissions, "administrator", False)
+            except Exception:
+                pass
         return False
 
     @classmethod
@@ -868,6 +894,16 @@ class AntiNukeManager:
         friendly_event = AntiNukeConstants.get_event_display_name(event_type)
         reason = f"{settings.BOT_NAME} Anti-Nuke: Threshold exceeded for {friendly_event}."
 
+        # Attempt to DM user before removing them from guild (so mutual server restriction is not hit)
+        await cls._send_punishment_dm(
+            guild=guild,
+            user=executor,
+            punishment=punishment,
+            event_type=event_type,
+            reason=reason,
+            details=details,
+        )
+
         try:
             if punishment == AntiNukeConstants.PUNISH_BAN:
                 await guild.ban(executor, reason=reason, delete_message_days=1)
@@ -922,6 +958,60 @@ class AntiNukeManager:
             return {"success": False, "error": str(err)}
 
         return {"success": False, "error": f"Unknown punishment {punishment}"}
+
+    @classmethod
+    async def _send_punishment_dm(
+        cls,
+        guild: discord.Guild,
+        user: discord.Member | discord.User,
+        punishment: str,
+        event_type: str,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Directly notifies the user via DM regarding the anti-nuke sanction applied.
+        Uses standardized Sentinel™ ContainerBuilder branding and handles closed DMs gracefully.
+        """
+        if not user or getattr(user, "bot", False):
+            return False
+
+        friendly_event = AntiNukeConstants.get_event_display_name(event_type)
+        punish_label = {
+            AntiNukeConstants.PUNISH_BAN: "Permanent Server Ban",
+            AntiNukeConstants.PUNISH_KICK: "Expulsion (Kick)",
+            AntiNukeConstants.PUNISH_TIMEOUT: "Security Timeout (28 Days)",
+            AntiNukeConstants.PUNISH_STRIP_ROLES: "Administrative Roles Stripped",
+            AntiNukeConstants.PUNISH_QUARANTINE: "Quarantined",
+            AntiNukeConstants.PUNISH_PRUNE: "Expulsion (Pruned)",
+        }.get(punishment, punishment.title())
+
+        ts = int(time.time())
+        dm_box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("error", "#B21F1F"))
+            .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} {settings.BOT_NAME} Security Sanction Applied")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"You have received an automated security sanction in **{guild.name}**.\n\n"
+                f"• **Action Taken:** `{punish_label}`\n"
+                f"• **Security Vector:** `{friendly_event}`\n"
+                f"• **Reason:** {reason}\n"
+                f"• **Timestamp:** <t:{ts}:F> (<t:{ts}:R>)\n\n"
+                f"-# *This automated enforcement was triggered in real-time by {settings.BOT_NAME} zero-tolerance anti-nuke protection.*"
+            )
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .set_footer(f"{settings.BOT_NAME} Autonomous Defense Sentinel")
+            .build()
+        )
+
+        try:
+            await user.send(view=dm_box)
+            logger.info(f"[AntiNuke] Successfully delivered sanction notification DM to {user} ({user.id})")
+            return True
+        except (discord.Forbidden, discord.HTTPException, Exception) as err:
+            logger.info(f"[AntiNuke] Could not DM sanction notification to {user} ({user.id}) [DMs Closed / Blocked]: {err}")
+            return False
 
     @classmethod
     async def _send_security_alert(

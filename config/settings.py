@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 _logger = logging.getLogger("MomentumOne.Config")
 
 class Settings:
-    BOT_NAME: str = os.getenv("BOT_NAME", "MomentumOne")
+    BOT_NAME: str = os.getenv("BOT_NAME", "Sentinel™")
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
     BOT_PREFIX: str = os.getenv("BOT_PREFIX", "$")
     CLIENT_ID: str = os.getenv("CLIENT_ID", "")
@@ -80,12 +80,21 @@ class AuthoritativeDict(dict):
 
 _raw_colors = _load_json_config("Colors.json")
 _raw_emojis = _load_json_config("Emojis.json")
+_raw_images = _load_json_config("Images.json")
 
 COLORS: Dict[str, str] = AuthoritativeDict("ColorsConfig", _raw_colors)
 EMOJIS: Dict[str, str] = AuthoritativeDict("EmojisConfig", _raw_emojis)
+IMAGES: Dict[str, str] = AuthoritativeDict("ImagesConfig", _raw_images)
+
+SENTINEL_AVATAR: str = "https://cdn.discordapp.com/avatars/1563628961379123302/d4a0d1341e7059c11b863f2a3a74dd75.png?size=512"
+SENTINEL_EMOJI: str = "<:sentinel:1563641257073442926>"
 
 def get_color(key: str, default: str = "#0844C5") -> str:
     return COLORS.get(key, default) or default
 
 def get_emoji(key: str, default: str = "") -> str:
     return EMOJIS.get(key, default) or default
+
+def get_image(key: str, default: str = SENTINEL_AVATAR) -> str:
+    return IMAGES.get(key, default) or default
+
