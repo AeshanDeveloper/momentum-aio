@@ -40,7 +40,7 @@ from .commands.dev import (
 )
 
 # Import events
-from .events import prefix_handler, slash_handler, component_handler
+from .events import prefix_handler, slash_handler, component_handler, guild_join
 from .events.antinuke import ALL_ANTINUKE_EVENT_MODULES
 from .events.logging import ALL_LOGGING_EVENT_MODULES
 
@@ -115,6 +115,7 @@ class Plugin(BasePlugin):
             prefix_handler,
             slash_handler,
             component_handler,
+            guild_join,
         ]
 
         for ev in event_modules:

@@ -297,11 +297,17 @@ class BotManager:
                 logger.error(f"[AntiNuke] Error in on_scheduled_event_delete: {err}")
 
         @self.client.event
+        @self.client.event
         async def on_thread_delete(thread: discord.Thread):
             try:
                 await AntiNukeService.on_thread_delete(thread)
             except Exception as err:
                 logger.error(f"[AntiNuke] Error in on_thread_delete: {err}")
+
+        @self.client.event
+        async def on_guild_join(guild: discord.Guild):
+            await _dispatch_plugin_events("on_guild_join", guild)
+            await _dispatch_plugin_events("guild_join", guild)
 
     async def setup(self) -> Dict[str, bool]:
         if self._is_setup:

@@ -1,7 +1,16 @@
 import time
 import uuid
 from typing import Dict, Any, Optional, List
-from aiohttp import web
+try:
+    from aiohttp import web
+except ImportError:
+    class MockWeb:
+        Response = object
+        Request = object
+        @staticmethod
+        def json_response(*args, **kwargs):
+            return None
+    web = MockWeb()
 from config.settings import settings
 
 class SessionManager:

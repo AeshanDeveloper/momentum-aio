@@ -471,6 +471,33 @@ class ComponentLayoutView(discord.ui.LayoutView):
         return self._collector
 
 
+class SectionBuilder:
+    def __init__(self):
+        self.components: List[Any] = []
+        self.accessory: Optional[Any] = None
+
+    def add_text_display(self, text: str) -> SectionBuilder:
+        if text is not None and str(text).strip():
+            from config.strings import render_string
+            rendered = render_string(str(text).strip())
+            self.components.append(discord.ui.TextDisplay(rendered))
+        return self
+
+    def set_thumbnail_accessory(self, url: str) -> SectionBuilder:
+        self.accessory = discord.ui.Thumbnail(str(url))
+        return self
+
+    def set_accessory(self, accessory: Any) -> SectionBuilder:
+        if isinstance(accessory, str):
+            self.accessory = discord.ui.Thumbnail(str(accessory))
+        else:
+            self.accessory = accessory
+        return self
+
+    def build(self) -> discord.ui.Section:
+        return discord.ui.Section(*self.components, accessory=self.accessory)
+
+
 class ContainerBuilder:
     def __init__(self):
         self._accent_color: Optional[int] = 0x0844C5
@@ -565,6 +592,48 @@ class ContainerBuilder:
         elif row is not None:
             self._components.append(row)
 
+        return self
+
+    def add_section(
+        self,
+        section_or_fn: Any = None,
+        *,
+        accessory: Any = None,
+        text: Optional[str] = None
+    ) -> ContainerBuilder:
+        if callable(section_or_fn):
+            sb = section_or_fn(SectionBuilder())
+            if isinstance(sb, SectionBuilder):
+                self._components.append(sb.build())
+            elif sb is not None:
+                self._components.append(sb)
+        elif isinstance(section_or_fn, SectionBuilder):
+            self._components.append(section_or_fn.build())
+        elif isinstance(section_or_fn, getattr(discord.ui, "Section", object)):
+            self._components.append(section_or_fn)
+        elif text is not None or section_or_fn is not None:
+            comps = []
+            if text:
+                from config.strings import render_string
+                comps.append(discord.ui.TextDisplay(render_string(str(text).strip())))
+            if section_or_fn:
+                if isinstance(section_or_fn, (list, tuple)):
+                    comps.extend(section_or_fn)
+                elif not text:
+                    if isinstance(section_or_fn, str):
+                        from config.strings import render_string
+                        comps.append(discord.ui.TextDisplay(render_string(str(section_or_fn).strip())))
+                    else:
+                        comps.append(section_or_fn)
+            acc = accessory
+            if isinstance(acc, str):
+                acc = discord.ui.Thumbnail(str(acc))
+            self._components.append(discord.ui.Section(*comps, accessory=acc))
+        return self
+
+    def add_media_gallery(self, *items: Union[str, Any]) -> ContainerBuilder:
+        if hasattr(discord.ui, "MediaGallery"):
+            self._components.append(discord.ui.MediaGallery(*items))
         return self
 
     def build_container(self) -> discord.ui.Container:

@@ -254,11 +254,17 @@ class RateLimited(HTTPException):
         super().__init__(message=f"Rate limited. Retry after {retry_after}s")
 
 class MessageFlags:
+    IsComponentsV2: int = 32768
+    is_components_v2_flag: int = 32768
+
     def __init__(self, value: int = 0):
         self.value = value
     @classmethod
     def ephemeral(cls):
         return cls(64)
+    @classmethod
+    def is_components_v2(cls):
+        return cls(32768)
 
 class BaseItem:
     def __init__(self, id: int = 0, name: str = ""):
@@ -321,6 +327,45 @@ class Channel(BaseItem):
 class TextChannel(Channel):
     def __init__(self, id: int = 0, name: str = ""):
         super().__init__(id, name, ChannelType.text)
+        self.overwrites: Dict[Any, Any] = {}
+        self.position: int = 0
+
+    def permissions_for(self, member_or_role: Any) -> Permissions:
+        if getattr(member_or_role, "guild_permissions", None) and member_or_role.guild_permissions.administrator:
+            return Permissions(
+                administrator=True,
+                view_channel=True,
+                send_messages=True,
+                embed_links=True,
+                attach_files=True,
+                read_messages=True,
+                manage_messages=True,
+            )
+
+        base_view = True
+        base_send = True
+        if hasattr(member_or_role, "guild_permissions"):
+            base_view = getattr(member_or_role.guild_permissions, "view_channel", True)
+            base_send = getattr(member_or_role.guild_permissions, "send_messages", True)
+        elif hasattr(member_or_role, "permissions"):
+            base_view = getattr(member_or_role.permissions, "view_channel", True)
+            base_send = getattr(member_or_role.permissions, "send_messages", True)
+
+        ow = self.overwrites.get(member_or_role)
+        if ow is not None:
+            if getattr(ow, "view_channel", None) is not None:
+                base_view = ow.view_channel
+            elif getattr(ow, "read_messages", None) is not None:
+                base_view = ow.read_messages
+            if getattr(ow, "send_messages", None) is not None:
+                base_send = ow.send_messages
+
+        return Permissions(
+            view_channel=base_view,
+            send_messages=base_send,
+            read_messages=base_view,
+        )
+
     async def send(self, *args, **kwargs):
         client = getattr(self, "_client", None) or Client._default_instance
         if client and client.token:
@@ -439,10 +484,57 @@ class Guild(BaseItem):
         self.roles.append(r)
         return r
 
+    @property
+    def default_role(self):
+        for r in self.roles:
+            if r.id == self.id or r.name == "@everyone":
+                return r
+        return Role(id=self.id, name="@everyone", position=0)
+
     async def kick(self, user, reason=None): pass
     async def ban(self, user, reason=None, delete_message_days=0): pass
     async def unban(self, user, reason=None): pass
     async def audit_logs(self, limit=10, action=None):
+        cached = getattr(self, "_audit_logs", [])
+        yielded = 0
+        if cached:
+            for entry in cached:
+                if action is None or entry.action == action:
+                    yield entry
+                    yielded += 1
+                    if limit and yielded >= limit:
+                        return
+        client = getattr(self, "_client", None) or Client._default_instance
+        if client and client.token:
+            try:
+                action_param = f"&action_type={action.value if hasattr(action, 'value') else action}" if action else ""
+                url = f"https://discord.com/api/v10/guilds/{self.id}/audit-logs?limit={limit or 10}{action_param}"
+                headers = {"Authorization": f"Bot {client.token}", "Content-Type": "application/json"}
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            users = {u["id"]: User(id=int(u["id"]), name=u.get("username", "")) for u in data.get("users", [])}
+                            for item in data.get("audit_log_entries", []):
+                                user = users.get(item.get("user_id"), User(id=int(item.get("user_id", 0))))
+                                target_id = int(item.get("target_id", 0)) if item.get("target_id") else None
+                                target = User(id=target_id) if target_id else None
+                                entry_act = action
+                                if hasattr(AuditLogAction, "_value2member_map_"):
+                                    entry_act = AuditLogAction._value2member_map_.get(item.get("action_type"), item.get("action_type"))
+                                entry = AuditLogEntry(
+                                    id=int(item.get("id", 0)),
+                                    action=entry_act,
+                                    user=user,
+                                    target=target
+                                )
+                                yield entry
+                                yielded += 1
+                                if limit and yielded >= limit:
+                                    return
+            except Exception as err:
+                _discord_logger.debug(f"audit_logs fetch error: {err}")
         return
         yield
 
@@ -484,6 +576,8 @@ def serialize_discord_payload(
             if emb_dict:
                 out_embeds.append(emb_dict)
 
+    is_components_v2 = False
+
     if view:
         children = getattr(view, "children", None)
         if children is None and (hasattr(view, "components") or hasattr(view, "_components")):
@@ -494,51 +588,19 @@ def serialize_discord_payload(
         for child in (children or []):
             if child is None:
                 continue
-            # If child is Container or has components and accent_color
-            if hasattr(child, "components") and hasattr(child, "accent_color"):
-                cont_title = getattr(child, "title", None)
-                cont_color = getattr(child, "accent_color", None)
-                cont_desc_lines: List[str] = []
-                cont_footer = None
-                cont_thumbnail = None
-                cont_fields: List[Dict[str, Any]] = []
-
-                for comp in getattr(child, "components", []):
-                    c_type = getattr(comp, "type", None)
-                    if c_type == 10:  # TextDisplay
-                        t_content = getattr(comp, "content", "")
-                        if t_content:
-                            t_str = str(t_content).strip()
-                            if t_str.startswith("-# "):
-                                cont_footer = t_str[3:].strip()
-                            elif not cont_title and (t_str.startswith("### ") or t_str.startswith("## ") or t_str.startswith("# ")):
-                                cont_title = t_str.lstrip("#").strip()
-                            else:
-                                cont_desc_lines.append(t_str)
-                    elif c_type == 14:  # Separator
-                        if (getattr(comp, "divider", False) or getattr(comp, "visible", False)) and cont_desc_lines:
-                            cont_desc_lines.append("────────────────────────")
-                    elif c_type == 11:  # Thumbnail
-                        cont_thumbnail = getattr(comp, "url", None)
-                    elif c_type == 1 or hasattr(comp, "components"):  # ActionRow
-                        out_components.append(comp.to_dict() if hasattr(comp, "to_dict") else comp)
-                    elif hasattr(comp, "to_dict"):
-                        out_components.append({"type": 1, "components": [comp.to_dict()]})
-
-                emb_dict = {}
-                if cont_title: emb_dict["title"] = str(cont_title)
-                if cont_desc_lines: emb_dict["description"] = "\n".join(cont_desc_lines)
-                if cont_color is not None:
-                    c_val = cont_color.value if hasattr(cont_color, "value") else cont_color
-                    if c_val: emb_dict["color"] = int(c_val)
-                if cont_footer: emb_dict["footer"] = {"text": str(cont_footer)}
-                if cont_thumbnail: emb_dict["thumbnail"] = {"url": str(cont_thumbnail)}
-                if emb_dict:
-                    out_embeds.append(emb_dict)
+            # If child is Container (type 17) or Container-like object
+            if getattr(child, "type", None) == 17 or (hasattr(child, "components") and hasattr(child, "accent_color")):
+                is_components_v2 = True
+                out_components.append(child.to_dict() if hasattr(child, "to_dict") else child)
+            elif getattr(child, "type", None) in (9, 10, 11, 12, 14):
+                is_components_v2 = True
+                out_components.append(child.to_dict() if hasattr(child, "to_dict") else child)
             elif getattr(child, "type", None) == 1 or hasattr(child, "components"):
                 out_components.append(child.to_dict() if hasattr(child, "to_dict") else child)
             elif hasattr(child, "to_dict"):
                 out_components.append({"type": 1, "components": [child.to_dict()]})
+            else:
+                out_components.append(child)
 
     payload: Dict[str, Any] = {}
     if out_content:
@@ -551,8 +613,19 @@ def serialize_discord_payload(
         payload["message_reference"] = message_reference
     if allowed_mentions:
         payload["allowed_mentions"] = allowed_mentions.to_dict() if hasattr(allowed_mentions, "to_dict") else allowed_mentions
+
+    flags = kwargs.get("flags", 0)
+    if isinstance(flags, MessageFlags):
+        flags = flags.value
+    flags = int(flags or 0)
+
     if ephemeral:
-        payload["flags"] = 64
+        flags |= 64
+    if is_components_v2:
+        flags |= 32768
+
+    if flags:
+        payload["flags"] = flags
 
     if not payload.get("content") and not payload.get("embeds") and not payload.get("components"):
         payload["content"] = "\u200b"
@@ -822,6 +895,41 @@ class ui:
             self.url = url
         def to_dict(self):
             return {"type": 11, "media": {"url": self.url}, "url": self.url}
+
+    class MediaGalleryItem:
+        def __init__(self, url: str, description: Optional[str] = None, spoiler: bool = False):
+            self.url = url
+            self.description = description
+            self.spoiler = spoiler
+        def to_dict(self):
+            d = {"media": {"url": self.url}}
+            if self.description:
+                d["description"] = self.description
+            if self.spoiler:
+                d["spoiler"] = self.spoiler
+            return d
+
+    class MediaGallery(Item):
+        def __init__(self, *items: Union[str, MediaGalleryItem, Dict[str, Any]]):
+            super().__init__()
+            self.type = 12
+            self.items: List[Any] = []
+            for item in items:
+                if isinstance(item, str):
+                    self.items.append(ui.MediaGalleryItem(url=item))
+                elif isinstance(item, dict):
+                    self.items.append(ui.MediaGalleryItem(
+                        url=item.get("url", ""),
+                        description=item.get("description"),
+                        spoiler=item.get("spoiler", False)
+                    ))
+                else:
+                    self.items.append(item)
+        def to_dict(self):
+            return {
+                "type": 12,
+                "items": [it.to_dict() if hasattr(it, "to_dict") else {"media": {"url": str(it)}} for it in self.items]
+            }
 
     class Section(Item):
         def __init__(self, *components: Any, accessory: Any = None):

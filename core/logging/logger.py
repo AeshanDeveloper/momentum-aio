@@ -11,16 +11,19 @@ class Logger:
         msg = " ".join(str(a) for a in args)
         return f"\033[90m{now}\033[0m \033[{color}m{level:<5}\033[0m: {msg}"
 
-    def info(self, *args: Any) -> None:
+    def info(self, *args: Any, **kwargs: Any) -> None:
         print(self._fmt("INFO", "32", *args), flush=True)
 
-    def debug(self, *args: Any) -> None:
+    def debug(self, *args: Any, **kwargs: Any) -> None:
         print(self._fmt("DEBUG", "34", *args), flush=True)
 
-    def warn(self, *args: Any) -> None:
+    def warn(self, *args: Any, **kwargs: Any) -> None:
         print(self._fmt("WARN", "33", *args), file=sys.stderr, flush=True)
 
-    def error(self, *args: Any) -> None:
+    def warning(self, *args: Any, **kwargs: Any) -> None:
+        self.warn(*args, **kwargs)
+
+    def error(self, *args: Any, **kwargs: Any) -> None:
         print(self._fmt("ERROR", "31", *args), file=sys.stderr, flush=True)
 
 logger = Logger()

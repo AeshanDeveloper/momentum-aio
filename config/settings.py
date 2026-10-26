@@ -40,6 +40,11 @@ class Settings:
         if x.strip()
     ]
 
+    # Service & Branding URLs
+    SUPPORT_SERVER_URL: str = os.getenv("SUPPORT_SERVER_URL", "https://discord.gg/momentumone")
+    BANNER_URL: str = os.getenv("BANNER_URL", "")
+    BOT_ICON_URL: str = os.getenv("BOT_ICON_URL", "")
+
 settings = Settings()
 
 def _load_json_config(filename: str) -> Dict[str, Any]:
@@ -97,4 +102,9 @@ def get_emoji(key: str, default: str = "") -> str:
 
 def get_image(key: str, default: str = SENTINEL_AVATAR) -> str:
     return IMAGES.get(key, default) or default
+
+if not settings.BANNER_URL:
+    settings.BANNER_URL = IMAGES.get("banner", "")
+if not settings.BOT_ICON_URL:
+    settings.BOT_ICON_URL = IMAGES.get("thumbnail", IMAGES.get("avatar", SENTINEL_AVATAR))
 

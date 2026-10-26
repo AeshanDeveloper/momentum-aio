@@ -1,7 +1,25 @@
 import os
 import time
 from typing import Optional, Any
-from aiohttp import web
+import json
+import http.server
+import threading
+from urllib.parse import urlparse
+try:
+    from aiohttp import web
+    _HAS_AIOHTTP = True
+except ImportError:
+    class MockWeb:
+        Request = Any
+        Response = Any
+        Application = None
+        AppRunner = None
+        TCPSite = None
+        @staticmethod
+        def json_response(*args, **kwargs):
+            return None
+    web = MockWeb()
+    _HAS_AIOHTTP = False
 from config.settings import settings
 from core.logging.logger import logger
 from core.audit.audit_log import AuditLog
@@ -12,12 +30,13 @@ from .auth import handle_auth_routes
 class ApiServer:
     def __init__(self, bot_manager: Any = None):
         self.bot_manager = bot_manager
-        self.app = web.Application()
+        self.app = web.Application() if _HAS_AIOHTTP else None
         self.started_at = time.time()
         self.public_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "public")
         )
-        self._setup_routes()
+        if self.app is not None:
+            self._setup_routes()
 
     def set_bot_manager(self, manager: Any) -> None:
         self.bot_manager = manager
@@ -130,22 +149,100 @@ class ApiServer:
         return web.json_response({"error": "Auth route not found"}, status=404)
 
     async def start(self) -> None:
-        runner = web.AppRunner(self.app)
-        await runner.setup()
         base_port = int(os.getenv("API_PORT", 3000))
         host = settings.HOST
-        for offset in range(10):
-            target_port = base_port + offset
-            try:
-                site = web.TCPSite(runner, host=host, port=target_port)
-                await site.start()
-                if offset > 0:
-                    logger.warn(f"[Server] Port {base_port} in use, bound to fallback port {target_port}")
-                else:
+
+        if _HAS_AIOHTTP and self.app is not None:
+            runner = web.AppRunner(self.app)
+            await runner.setup()
+            for offset in range(10):
+                target_port = base_port + offset
+                try:
+                    site = web.TCPSite(runner, host=host, port=target_port)
+                    await site.start()
+                    if offset > 0:
+                        logger.warn(f"[Server] Port {base_port} in use, bound to fallback port {target_port}")
+                    else:
+                        logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://{host}:{target_port}")
+                    return
+                except OSError as e:
+                    if e.errno == 98 or "address already in use" in str(e).lower():
+                        continue
+                    raise
+            logger.error(f"[Server] Could not bind web server to any port in range {base_port}-{base_port+9}")
+        else:
+            server_ref = self
+            class StdlibHandler(http.server.BaseHTTPRequestHandler):
+                def log_message(self, format, *args):
+                    pass
+
+                def do_GET(self):
+                    parsed = urlparse(self.path)
+                    path = parsed.path
+                    if path in ("/", "/index.html"):
+                        index_file = os.path.join(server_ref.public_dir, "index.html")
+                        if os.path.isfile(index_file):
+                            with open(index_file, "rb") as f:
+                                body = f.read()
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/html; charset=utf-8")
+                            self.end_headers()
+                            self.wfile.write(body)
+                            return
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.end_headers()
+                        self.wfile.write(b"<!DOCTYPE html><html><head><title>Sentinel Control Platform</title></head><body><h1>Sentinel Control Platform</h1><p>MomentumOne Server Active</p></body></html>")
+                        return
+                    elif path == "/api/health":
+                        uptime = int((time.time() - server_ref.started_at) * 1000)
+                        self._send_json({"api": "reachable", "bot": server_ref._bot_status(), "uptime": uptime})
+                        return
+                    elif path in ("/api/bot/status", "/api/bot/info"):
+                        self._send_json(server_ref._bot_status())
+                        return
+                    elif path == "/api/environment/status":
+                        self._send_json(server_ref._env_status())
+                        return
+                    elif path == "/api/config":
+                        self._send_json({"environment": settings.ENVIRONMENT, "botEnabled": settings.BOT_ENABLED, "editable": []})
+                        return
+                    elif path == "/api/registry":
+                        reg = server_ref.bot_manager.registry() if server_ref.bot_manager else {"commands": [], "plugins": [], "events": []}
+                        self._send_json(reg)
+                        return
+                    elif path.startswith("/static/"):
+                        rel_path = path[len("/static/"):].lstrip("/")
+                        file_path = os.path.join(server_ref.public_dir, rel_path)
+                        if os.path.isfile(file_path):
+                            with open(file_path, "rb") as f:
+                                body = f.read()
+                            self.send_response(200)
+                            self.end_headers()
+                            self.wfile.write(body)
+                            return
+                    self.send_response(404)
+                    self.end_headers()
+
+                def do_POST(self):
+                    self._send_json({"error": "Action unavailable"}, status=501)
+
+                def _send_json(self, data, status=200):
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(data).encode("utf-8"))
+
+            for offset in range(10):
+                target_port = base_port + offset
+                try:
+                    httpd = http.server.ThreadingHTTPServer((host, target_port), StdlibHandler)
+                    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+                    t.start()
                     logger.info(f"[Server] MomentumOne Web API & Control Center listening on http://{host}:{target_port}")
-                return
-            except OSError as e:
-                if e.errno == 98 or "address already in use" in str(e).lower():
-                    continue
-                raise
-        logger.error(f"[Server] Could not bind web server to any port in range {base_port}-{base_port+9}")
+                    return
+                except OSError as e:
+                    if e.errno == 98 or "address already in use" in str(e).lower():
+                        continue
+                    raise
+            logger.error(f"[Server] Could not bind stdlib web server to any port in range {base_port}-{base_port+9}")
