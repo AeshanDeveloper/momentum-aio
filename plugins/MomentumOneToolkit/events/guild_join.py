@@ -4,7 +4,7 @@ import os
 from typing import Any, Optional, Set
 import discord
 
-from config.settings import settings, IMAGES, SENTINEL_AVATAR, get_color, get_image
+from config.settings import settings, IMAGES, SENTINEL_AVATAR, get_color, get_emoji, get_image, EMOJIS
 from core.logging.logger import logger
 from sdk.discord.builders import (
     ContainerBuilder,
@@ -211,14 +211,13 @@ def build_welcome_container(guild: discord.Guild) -> Any:
 
     # Order 2: Main section with thumbnail accessory & text display
     welcome_copy = (
-        "-# Sentinel™\n"
-        "### Enterprise Server Security & Defense Wall\n"
-        f"Thank you for adding **Sentinel™** to **{guild.name}**! "
-        "Sentinel delivers comprehensive server protection, real-time zero-tolerance anti-nuke "
+        f"-# {get_emoji('bot_icon')} @{settings.BOT_NAME}\n"
+        f"Thank you for adding [{settings.BOT_NAME}]({settings.SUPPORT_SERVER_URL}) to **{guild.name}**!\n\n"
+        f"{get_emoji('sub_point')} [{settings.BOT_NAME}]({settings.SUPPORT_SERVER_URL}) specializes in neglecting attacks on the server even from betrayals by whitelisted members, through safety patterns and algorithmic calculations"
         "enforcement, forensic administrative auditing, and automated threat containment.\n\n"
-        "• **Anti-Nuke Systems:** High-frequency event monitoring guarding channels, roles, webhooks, and permissions.\n"
-        "• **Forensic Auditing:** Automated detection and attribution for administrative anomalies.\n"
-        "• **Immediate Setup:** Type `$setup` or `$antinuke setup` to initialize your server's defensive posture."
+        f"- {get_emoji('antinuke')} **Anti-Nuke Systems:** High-frequency event monitoring guarding channels, roles, webhooks, and permissions.\n"
+        f"- {get_emoji('log')} **Forensic Auditing:** Automated detection and attribution for administrative anomalies.\n"
+        f"- {get_emoji('security')} **Immediate Protection:** Type `$setup` or `$antinuke setup` to initialize your server's defensive posture."
     )
 
     section = SectionBuilder()
@@ -231,13 +230,13 @@ def build_welcome_container(guild: discord.Guild) -> Any:
     action_row = ActionRowBuilder()
     action_row.add_button(
         ButtonBuilder()
-        .set_label("Invite Sentinel")
+        .set_label("Invite")
         .set_style(ButtonStyle.Link)
         .set_url(invite_url)
     )
     action_row.add_button(
         ButtonBuilder()
-        .set_label("Support Server")
+        .set_label("Support")
         .set_style(ButtonStyle.Link)
         .set_url(support_url)
     )
@@ -265,14 +264,12 @@ def build_inviter_dm_container(guild: discord.Guild, inviter: discord.User) -> A
     builder.set_accent_color(get_color("primary", "#0844C5"))
 
     dm_copy = (
-        "-# Sentinel™\n"
-        f"### Thank you for inviting Sentinel™ to {guild.name}!\n"
-        f"Hello {getattr(inviter, 'name', 'Administrator')}, Sentinel is now actively connected and observing gateway "
-        f"events in **{guild.name}**.\n\n"
+        f"-# {get_emoji('bot_icon')} @{settings.BOT_NAME}\n"
+        f"Hello {getattr(inviter, 'name', 'Administrator')}, Sentinel is now actively connected and looking after your server!"
+        f"\n\n"
         "**Recommended Next Steps:**\n"
-        "• **Run Guided Security Audit:** Use `$setup` to verify bot role hierarchy and audit dangerous permissions.\n"
-        "• **Configure Alert Channels:** Run `$antinuke setwarning #channel` and `$antinuke setlog #channel`.\n"
-        "• **Explore Command Center:** Use `$help` to view all moderation, anti-nuke, and utility controls."
+        f"- {get_emoji('sub_point')} **Run Guided Security Audit:** Use `$setup` to verify bot role hierarchy, audit dangerous permissions and enable antinuke, it'll guide you through everything reliabily.\n"
+        f"- {get_emoji('sub_point')} **Explore Command Center:** Use `$help` to view all moderation, anti-nuke, and utility controls."
     )
 
     section = SectionBuilder()
@@ -284,13 +281,13 @@ def build_inviter_dm_container(guild: discord.Guild, inviter: discord.User) -> A
     action_row = ActionRowBuilder()
     action_row.add_button(
         ButtonBuilder()
-        .set_label("Invite Sentinel")
+        .set_label("Invite")
         .set_style(ButtonStyle.Link)
         .set_url(invite_url)
     )
     action_row.add_button(
         ButtonBuilder()
-        .set_label("Support Server")
+        .set_label("Support")
         .set_style(ButtonStyle.Link)
         .set_url(support_url)
     )
