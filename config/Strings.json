@@ -357,9 +357,9 @@
             "punishment_overview": "Configure automated punishments when an unwhitelisted entity exceeds authorized thresholds.\n\n• **Current Operating Mode:** `{mode_name}`\n• **Active Punishments Configured:** `{count}` events",
             "punishment_invalid": "{emoji:cross} Invalid punishment. Allowed actions: `ban`, `kick`, `quarantine`, `timeout`.",
             "modes": {
-                "hard": "Hard (Zero-Tolerance)",
-                "ultimate": "Ultimate Defence Wall (Disabled)",
-                "hybrid": "Hybrid Defense (Disabled)"
+                "hard": "Traditional Anti-Nuke (Hard)",
+                "ultimate": "Aegis Continuous Observability",
+                "hybrid": "Hybrid Security (Anti-Nuke + Aegis)"
             },
             "mode_disabled_notice": "{emoji:warning} The mode `{mode}` is currently disabled by system feature flags. Only enabled security modes can be activated.",
             "punishments": {

@@ -22,7 +22,7 @@ from typing import Dict, Any, List, Optional, Set, Union
 
 import discord
 
-from config.settings import settings
+from config.settings import settings, COLORS, EMOJIS, get_color, get_emoji
 from core.logging.logger import logger
 from database.database import database
 from core.security.response_policy import (
@@ -241,6 +241,108 @@ class SecurityProtectionService:
                 lockdown_record=lockdown_record,
                 policy=policy,
             )
+
+        # 3. Dispatch Threat Forensic Log directly to server's security forensic logs channel
+        await self.dispatch_threat_log(
+            guild=guild,
+            incident=incident,
+            assessment=assessment,
+            lockdown_record=lockdown_record,
+            policy=policy,
+        )
+
+    async def dispatch_threat_log(
+        self,
+        guild: Any,
+        incident: Incident,
+        assessment: AssessmentResult,
+        lockdown_record: Optional[LockdownRecord] = None,
+        policy: Optional[SecurityResponsePolicy] = None,
+    ) -> bool:
+        """
+        Dispatches structured forensic threat log directly to the server's security logs forensic logs channel.
+        """
+        if not guild:
+            return False
+
+        gid = str(guild.id)
+        pol = policy or self.get_policy(gid)
+
+        from core.security.antinuke import AntiNukeManager
+        cfg = AntiNukeManager.get_guild_config(gid)
+
+        target_channel = None
+        candidate_ids = [
+            pol.fallback_channel_id,
+            cfg.get("warning_channel_id"),
+            cfg.get("log_channel_id"),
+        ]
+        for cid in candidate_ids:
+            if cid and hasattr(guild, "get_channel"):
+                try:
+                    target_channel = guild.get_channel(int(cid))
+                    if target_channel:
+                        break
+                except Exception:
+                    pass
+
+        is_shadow = getattr(lockdown_record, "is_shadow_mode", False) if lockdown_record else getattr(incident, "is_shadow_mode", False)
+        mode_label = "SHADOW (Simulation)" if is_shadow else "LIVE ENFORCEMENT"
+        rec_action = assessment.recommended_action.value if hasattr(assessment.recommended_action, "value") else str(getattr(assessment, "recommended_action", "ALERT"))
+        sev_str = (getattr(assessment, "severity", None) or "medium").upper()
+        conf_str = (getattr(assessment, "confidence", None) or "inferred").upper()
+        score_val = getattr(assessment, "threat_score", 0.0) or 0.0
+
+        from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
+        threat_box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("danger", "#ED4245"))
+            .add_text_display(f"### {EMOJIS.get('danger', '🚨')} Sentinel™ Threat Forensic Log")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"**Aegis Correlation Threat Assessment**\n\n"
+                f"• **Incident ID:** `{incident.incident_id}`\n"
+                f"• **Threat Score:** `{score_val:.1f} / 100` ({sev_str})\n"
+                f"• **Attribution Confidence:** `{conf_str}`\n"
+                f"• **Recommended Action:** `{rec_action.upper()}`\n"
+                f"• **Operating Mode:** `{mode_label}`\n"
+                f"• **Incident Context:** {incident.title}\n"
+                f"• **Timestamp:** <t:{int(time.time())}:F> (<t:{int(time.time())}:R>)"
+            )
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .set_footer(f"{settings.BOT_NAME} Forensic Audit Trail • Tamper-Evident SHA-256")
+            .build()
+        )
+
+        sent = False
+        if target_channel and hasattr(target_channel, "send"):
+            try:
+                await target_channel.send(view=threat_box)
+                sent = True
+            except Exception as err:
+                logger.warning(f"[ProtectionService] Threat log delivery to forensic channel failed: {err}")
+
+        # Dispatch via UnifiedWebhookLogger under LogCategory.SECURITY
+        try:
+            from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
+            await UnifiedWebhookLogger.dispatch_log(
+                guild=guild,
+                category=LogCategory.SECURITY,
+                title=f"Security Threat Forensic Log: {incident.title}",
+                description=f"A threat assessment was executed by Sentinel. Threat score: {score_val:.1f}.",
+                reason=f"Action: {rec_action.upper()} | Mode: {mode_label}",
+                fields=[
+                    {"name": "Incident ID", "value": f"`{incident.incident_id}`", "inline": True},
+                    {"name": "Threat Score", "value": f"`{score_val:.1f}`", "inline": True},
+                    {"name": "Confidence", "value": f"`{conf_str}`", "inline": True},
+                    {"name": "Enforced Action", "value": f"`{rec_action.upper()}`", "inline": True},
+                ],
+                severity=LogSeverity.CRITICAL if sev_str == "CRITICAL" else LogSeverity.HIGH,
+            )
+        except Exception as err:
+            logger.debug(f"[ProtectionService] Webhook logger dispatch for threat log: {err}")
+
+        return sent
 
     # Manual Command Helpers
     async def manual_lockdown(

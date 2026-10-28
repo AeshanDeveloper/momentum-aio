@@ -76,6 +76,8 @@ class Plugin(BasePlugin):
             command_manage,
             antinuke,
             sec_setup,
+            security,
+            explain,
             whitelist,
             unwhitelist,
             punishment,

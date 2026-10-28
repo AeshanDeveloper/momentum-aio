@@ -478,6 +478,14 @@ class BaseItem:
         self.id = id
         self.name = name
 
+    def __hash__(self) -> int:
+        return hash(self.id)
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, BaseItem):
+            return self.id == other.id
+        return False
+
 class User(BaseItem):
     def __init__(self, id: int = 0, name: str = "", bot: bool = False):
         super().__init__(id, name)
@@ -552,6 +560,9 @@ class Role(BaseItem):
         if not isinstance(other, Role):
             return False
         return self.id == other.id
+
+    def __hash__(self) -> int:
+        return hash(self.id)
 
     def __str__(self) -> str:
         return self.name or f"Role({self.id})"

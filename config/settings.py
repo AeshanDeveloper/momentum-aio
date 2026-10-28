@@ -36,7 +36,7 @@ class Settings:
     # Anti-Nuke Feature Flags
     ANTINUKE_MODES_ENABLED: List[str] = [
         x.strip().lower()
-        for x in os.getenv("ANTINUKE_MODES_ENABLED", "hard").split(",")
+        for x in os.getenv("ANTINUKE_MODES_ENABLED", "hard,ultimate,hybrid").split(",")
         if x.strip()
     ]
 

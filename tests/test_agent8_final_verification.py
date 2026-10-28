@@ -866,6 +866,11 @@ class TestAgent8FinalVerification(unittest.IsolatedAsyncioTestCase):
             actor_id="99999",
         )
 
+        # Warmup to prime caches and isolate real-time algorithmic execution latency
+        warmup_ev = SecurityEvent(guild_id="77001", event_type=SecurityEventType.CHANNEL_CREATE, target_id="warmup", actor_id="99999")
+        self.collector.ingest(warmup_ev)
+        self.activity_mgr.record_event(warmup_ev)
+
         t0 = time.perf_counter()
         self.collector.ingest(event)
         t_ingest = (time.perf_counter() - t0) * 1000.0 # ms

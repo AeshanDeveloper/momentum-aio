@@ -265,9 +265,9 @@ class AntiNukeConstants:
 
     @classmethod
     def get_enabled_modes(cls) -> List[str]:
-        raw = getattr(settings, "ANTINUKE_MODES_ENABLED", ["hard"]) or ["hard"]
+        raw = getattr(settings, "ANTINUKE_MODES_ENABLED", ["hard", "ultimate", "hybrid"]) or ["hard", "ultimate", "hybrid"]
         enabled = [m.lower().strip() for m in raw if m.lower().strip() in cls.VALID_MODES]
-        return enabled if enabled else [cls.MODE_HARD]
+        return enabled if enabled else cls.VALID_MODES.copy()
 
     @classmethod
     def is_mode_enabled(cls, mode: str) -> bool:
@@ -513,11 +513,11 @@ class AntiNukeManager:
         if localized:
             return localized
         if mode == AntiNukeConstants.MODE_HARD:
-            return "Hard (Zero-Tolerance)"
+            return "Traditional Anti-Nuke (Hard)"
         elif mode == AntiNukeConstants.MODE_ULTIMATE:
-            return "Ultimate Defence Wall (Disabled)"
+            return "Aegis Continuous Observability"
         elif mode == AntiNukeConstants.MODE_HYBRID:
-            return "Hybrid Defense (Disabled)"
+            return "Hybrid Security (Anti-Nuke + Aegis)"
         return mode.title()
 
     @classmethod
@@ -760,29 +760,40 @@ class AntiNukeManager:
         if not me:
             return {"can_act": False, "reason": "Bot member is not present in guild."}
 
-        if not me.guild_permissions.administrator:
+        bot_perms = getattr(me, "guild_permissions", None)
+        if bot_perms and not getattr(bot_perms, "administrator", False):
             needed = {
-                "ban": me.guild_permissions.ban_members,
-                "kick": me.guild_permissions.kick_members,
-                "manage_roles": me.guild_permissions.manage_roles,
-                "manage_channels": me.guild_permissions.manage_channels,
-                "view_audit_log": me.guild_permissions.view_audit_log,
+                "ban": getattr(bot_perms, "ban_members", False),
+                "ban_members": getattr(bot_perms, "ban_members", False),
+                "kick": getattr(bot_perms, "kick_members", False),
+                "kick_members": getattr(bot_perms, "kick_members", False),
+                "manage_roles": getattr(bot_perms, "manage_roles", False),
+                "roles": getattr(bot_perms, "manage_roles", False),
+                "manage_channels": getattr(bot_perms, "manage_channels", False),
+                "channels": getattr(bot_perms, "manage_channels", False),
+                "view_audit_log": getattr(bot_perms, "view_audit_log", False),
+                "audit_log": getattr(bot_perms, "view_audit_log", False),
+                "moderate_members": getattr(bot_perms, "moderate_members", False),
+                "timeout": getattr(bot_perms, "moderate_members", False),
             }
-            if required_perm_name and not needed.get(required_perm_name, False):
+            norm_perm = required_perm_name.lower().replace(" ", "_") if required_perm_name else None
+            if norm_perm and not needed.get(norm_perm, False):
                 return {
                     "can_act": False,
                     "reason": f"Bot is missing required Discord permission: `{required_perm_name}`."
                 }
 
         if target:
-            if target.id == guild.owner_id:
+            if target.id == getattr(guild, "owner_id", 0):
                 return {"can_act": False, "reason": "Target is the Server Owner; Discord prevents all bot actions."}
             if target.id == me.id:
                 return {"can_act": False, "reason": "Target is the bot itself."}
-            if target.top_role >= me.top_role:
+            target_top = getattr(target, "top_role", None)
+            me_top = getattr(me, "top_role", None)
+            if target_top and me_top and target_top >= me_top:
                 return {
                     "can_act": False,
-                    "reason": f"Target's highest role ({target.top_role.name}) is higher than or equal to {settings.BOT_NAME}'s role ({me.top_role.name})."
+                    "reason": f"Target's highest role ({target_top.name}) is higher than or equal to {settings.BOT_NAME}'s role ({me_top.name})."
                 }
 
         return {"can_act": True, "reason": "Bot has adequate hierarchy and permissions."}
@@ -1108,6 +1119,15 @@ class AntiNukeManager:
             .set_footer(f"{settings.BOT_NAME} Security Sentinel • Incident Record")
             .build()
         )
+
+        # Directly dispatch threat log container to server's security / forensic logs channel
+        if warning_channel_id and hasattr(guild, "get_channel"):
+            try:
+                target_chan = guild.get_channel(int(warning_channel_id))
+                if target_chan and hasattr(target_chan, "send"):
+                    await target_chan.send(view=container)
+            except Exception as err:
+                logger.debug(f"[AntiNuke] Direct delivery to forensic channel failed: {err}")
 
         from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
         await UnifiedWebhookLogger.dispatch_log(
