@@ -1,0 +1,783 @@
+Sentinel — Comprehensive Security System Fix & Redesign
+
+You are working on Sentinel, a specialist Discord server security bot built using the existing MomentumOne framework and Python implementation.
+
+Your task is to audit, fix, improve, and test the existing security system end to end. Do not simply hide warnings, change displayed permission values, or redesign the dashboard while leaving the underlying logic broken.
+
+The primary goals are:
+
+1. Fix incorrect permission and role-hierarchy checks.
+2. Repair the setup, security, lockdown, and explain commands.
+3. Build a complete, interactive Security Dashboard.
+4. Activate all three security modes, including automatic observability and hybrid operation.
+5. Make every security feature understandable and configurable.
+6. Preserve the existing architecture and avoid regressions.
+
+Inspect the entire relevant codebase before making changes.
+
+---
+
+1. CRITICAL: FIX PERMISSION DETECTION
+
+The bot has Discord's Administrator permission, and its role is positioned above the other server roles. However, Sentinel incorrectly reports that it lacks permissions such as Ban Members and that most roles are not manageable.
+
+This behavior must be investigated and fixed at its source.
+
+1.1 Audit all permission checks
+
+Inspect and fix permission validation across:
+
+- "/setup"
+- "/security"
+- "/lockdown"
+- "/explain"
+- Security Dashboard interactions
+- Anti-nuke setup and configuration
+- Automatic observability configuration
+- Hybrid-mode configuration
+- Role-management and emergency-response services
+- Any shared permission or hierarchy utility
+
+Search for duplicated permission-checking logic. Where appropriate, consolidate it into a shared, reliable permission-validation service.
+
+Do not create another permission utility if a suitable one already exists.
+
+1.2 Correctly recognize Administrator
+
+Discord's Administrator permission grants all permissions within the server, bypassing channel-specific permission overwrites.
+
+If Sentinel has Administrator, permission checks for capabilities granted by Administrator must not incorrectly report that Sentinel lacks them.
+
+Check the actual bot member's effective guild permissions rather than relying on:
+
+- A stale cached permission object.
+- Channel permissions when checking guild-level capabilities.
+- Incorrect role IDs.
+- The permissions of the server owner or command invoker.
+- A hardcoded permission list that ignores Administrator.
+- A stale bot-member object.
+- An incorrect comparison between permission names and bitfields.
+- An incorrect assumption that Administrator must coexist with every individual permission flag.
+
+Use the permission APIs supported by the installed Discord library version.
+
+When evaluating a permission, correctly account for the Administrator permission before reporting that an individual capability is missing.
+
+Important: Do not blindly declare every permission check successful merely because the bot appears to have Administrator in its role settings. Verify the actual bot member, guild, and effective permissions.
+
+If the bot genuinely lacks a required capability, report the exact missing capability and explain how to resolve it.
+
+1.3 Fix role hierarchy and role manageability
+
+Sentinel currently reports that almost all server roles are unreachable or unmanageable.
+
+Investigate the actual cause.
+
+Check:
+
+- The bot's highest role.
+- The target role's position and hierarchy.
+- Whether the target role is managed by an integration or bot.
+- Whether the role is otherwise editable through Discord's API.
+- Whether the bot is evaluating the correct guild member.
+- Whether role comparisons use the correct Discord library APIs.
+- Whether the code incorrectly compares role IDs, positions, or role objects.
+- Whether equal-position roles are handled correctly.
+- Whether the target is the server owner's role or another special case.
+- Whether the check confuses permission possession with role manageability.
+
+Use the library's supported role-comparison methods where available instead of relying on fragile manual comparisons.
+
+The implementation must distinguish between:
+
+1. The bot has permission to manage roles.
+2. The bot's highest role is above the target role.
+3. The target role is actually editable through Discord's API.
+4. The bot can modify the permissions or members associated with that role.
+5. The target role is excluded because of Discord's restrictions.
+
+These are different checks and must not be represented by one misleading Boolean.
+
+A role must not be marked unmanageable merely because the bot's code has a faulty hierarchy calculation.
+
+1.4 Make role diagnostics accurate
+
+When a role cannot be managed, provide its name, relevant role hierarchy information, and the actual reason.
+
+For example:
+
+- "Manageable" — the bot can manage this role.
+- "Blocked by hierarchy" — the target role is not below the bot's highest role.
+- "Managed role" — Discord controls the role through an integration.
+- "Missing permission" — the bot genuinely lacks the required capability.
+- "API restriction" — the action is restricted by Discord.
+
+Do not show a generic warning that almost all roles are unreachable when the actual problem is an incorrect permission check.
+
+Do not suppress genuine warnings.
+
+---
+
+2. REPAIR THE LOCKDOWN COMMAND
+
+The "/lockdown" command currently claims that lockdown was activated while its diagnostic details say that the bot cannot ban members, cannot manage roles, or cannot reach most roles.
+
+Investigate this inconsistency.
+
+Requirements
+
+1. Audit the complete lockdown execution flow.
+2. Verify the permissions required by each lockdown action.
+3. Correct Administrator handling and role-hierarchy checks.
+4. Distinguish between successfully completed actions and failed actions.
+5. Do not report an action as successful before its outcome is confirmed.
+6. Report partial lockdowns accurately.
+7. Record the actions attempted, their results, and any failures.
+8. Make repeated lockdown requests safe and idempotent.
+9. Ensure the command does not silently leave the server exposed after a partial failure.
+10. Provide a safe recovery path for authorized administrators.
+
+Do not assume every lockdown requires banning members.
+
+The system should use the configured emergency-response policy, such as restricting dangerous permissions, preventing further destructive activity, and applying appropriate channel restrictions.
+
+Avoid unnecessary bans, indiscriminate role removal, or permanent permission destruction.
+
+Lockdown dashboard
+
+Create a clear interface showing:
+
+- Current lockdown state.
+- Reason for activation.
+- Activation time.
+- Triggering event or authorized user.
+- Actions completed.
+- Actions failed.
+- Remaining risks.
+- Available recovery actions.
+
+Use buttons and select menus where appropriate.
+
+Provide an authorized recovery workflow that lets trusted administrators review the incident and explicitly confirm the appropriate recovery action.
+
+A trusted administrator must be able to correct an earlier decision if the lockdown was triggered accidentally.
+
+Recovery must restore only the permissions and settings that Sentinel changed and must not overwrite unrelated changes made by server administrators during the incident.
+
+If a lockdown action fails, display the actual failure rather than falsely reporting full protection.
+
+---
+
+3. FIX THE SETUP AND SECURITY COMMANDS
+
+Audit the "/setup" and "/security" commands from beginning to end.
+
+Both must use the same reliable permission-validation logic.
+
+Setup command
+
+The setup flow must:
+
+- Verify the correct guild and bot member.
+- Display accurate permission diagnostics.
+- Distinguish mandatory permissions from optional capabilities.
+- Explain why a permission is needed.
+- Identify genuine role-hierarchy restrictions.
+- Avoid duplicate setup records, channels, webhooks, and configurations.
+- Preserve existing valid settings.
+- Allow users to revisit and change their choices.
+- Display setup progress and meaningful errors.
+- Support safe retries after an interrupted setup.
+- Confirm when configuration changes have actually been saved.
+
+Security command
+
+The "/security" command must become the entry point to Sentinel's complete security-management experience.
+
+It must no longer display only the existing anti-nuke dashboard.
+
+Implement the new Security Dashboard described below.
+
+---
+
+4. BUILD A COMPLETE SECURITY DASHBOARD
+
+Redesign "/security" as a polished, interactive control center.
+
+The current anti-nuke-only dashboard is insufficient because Sentinel includes several security systems that users need to configure and understand independently.
+
+The dashboard must provide access to every supported security feature through Discord buttons, select menus, and modals where appropriate.
+
+Use the existing Discord Components V2 implementation and the components supported by the installed SDK.
+
+Do not invent component-builder methods or replace the project's existing interaction architecture without a demonstrated technical reason.
+
+4.1 Main dashboard
+
+The main dashboard should clearly display:
+
+- Sentinel's security status.
+- The currently active security mode.
+- Anti-nuke status.
+- Automatic observability status.
+- Hybrid-mode status where applicable.
+- Lockdown status.
+- Important unresolved alerts.
+- Last security event.
+- Last successful configuration update.
+- Any genuinely missing permissions.
+- Any outstanding setup requirements.
+
+Use a compact layout with clear feature separation.
+
+Users must immediately understand which systems are enabled and which are disabled.
+
+Do not overwhelm the main page with every configuration option.
+
+4.2 Dashboard navigation
+
+Create distinct sections for:
+
+1. Overview.
+2. Security Modes.
+3. Anti-Nuke Protection.
+4. Automatic Observability.
+5. Hybrid Security.
+6. Lockdown and Emergency Response.
+7. Trusted Administrators.
+8. Protected Roles and Members.
+9. Permission and Role Diagnostics.
+10. Event Monitoring.
+11. Detection Thresholds.
+12. Automated Responses.
+13. Security Logs and Alerts.
+14. Direct Messages and Notifications.
+15. Exemptions and Allowlisted Actions.
+16. Recovery and Incident History.
+17. Advanced Configuration.
+
+Only expose options that are implemented or can be implemented correctly in the existing architecture.
+
+If a feature is unavailable, clearly mark it as unavailable rather than presenting a nonfunctional control.
+
+4.3 Interaction behavior
+
+Every button, select menu, and modal must work.
+
+Implement:
+
+- Navigation between sections.
+- Back and home buttons.
+- Pagination for long lists.
+- Enable and disable controls.
+- Configuration forms.
+- Confirmation for destructive or high-impact actions.
+- Clear success and failure responses.
+- Interaction authorization.
+- Correct handling of expired interactions.
+- Safe handling of concurrent configuration changes.
+- Consistent timeout and error handling.
+
+Persist changes to the existing database using the established data-access patterns.
+
+Do not create duplicate configuration records when users revisit a section.
+
+Prevent unauthorized users from changing security settings simply by interacting with a dashboard message.
+
+Revalidate authorization and relevant server state when a security-sensitive interaction is submitted.
+
+---
+
+5. ACTIVATE ALL THREE SECURITY MODES
+
+Previously, the project had three security modes. Two were disabled temporarily.
+
+Now enable the second and third modes.
+
+First, locate the original mode definitions, their configuration values, and their existing implementations. Preserve the intended behavior rather than guessing what each mode was supposed to do.
+
+The three modes must be available through the Security Dashboard.
+
+Mode 1: Traditional Anti-Nuke
+
+Preserve the existing anti-nuke protection system.
+
+It should focus on detecting and responding to destructive administrative activity, including applicable events such as:
+
+- Mass channel deletion.
+- Mass role deletion.
+- Unauthorized role or permission changes.
+- Mass bans or kicks.
+- Webhook abuse.
+- Dangerous bot additions.
+- Other destructive events already supported by the project.
+
+Use the existing detection logic and configuration wherever possible.
+
+Repair bugs without unnecessarily replacing working detection mechanisms.
+
+Mode 2: Automatic Observability
+
+Enable the second mode.
+
+This is the existing automatic observability system developed for Sentinel.
+
+Give the observability system a new, distinct user-facing name. Do not remove the existing implementation or rename internal modules, database collections, or identifiers indiscriminately.
+
+Inspect the existing codebase for a suitable name already used by the project. If none exists, choose a concise, professional name that communicates continuous security monitoring.
+
+Use that new name consistently in the dashboard, help text, explanations, and configuration labels, while maintaining backward compatibility with existing configuration.
+
+This mode must make the monitoring system available independently of traditional anti-nuke protection.
+
+It should:
+
+- Observe supported security-relevant Discord events.
+- Maintain relevant event history.
+- Identify suspicious patterns.
+- Apply configured thresholds and escalation policies.
+- Generate useful incident records.
+- Notify the appropriate administrators.
+- Execute only the automated responses configured for this mode.
+- Explain why an alert or action was triggered.
+- Support review and investigation of previous incidents.
+
+Observability must not automatically mean that every detected anomaly warrants punishment.
+
+Separate event collection, detection, alerting, and enforcement into understandable stages.
+
+Use the existing observability architecture wherever it is sound.
+
+Mode 3: Hybrid Security
+
+Enable the third mode.
+
+Hybrid mode must combine traditional anti-nuke protection and automatic observability so that both operate concurrently.
+
+It must not simply display two enabled labels while running only one system.
+
+Requirements:
+
+- Both systems initialize correctly.
+- Both systems receive the events they require.
+- Both systems maintain their own detection logic and configuration.
+- Their results can contribute to a shared incident record.
+- Duplicate alerts and conflicting responses are controlled.
+- Emergency responses can take priority when immediate action is justified.
+- Observability continues to collect useful evidence.
+- The dashboard accurately reflects the status of both systems.
+
+Create a clear distinction between an event being observed, an incident being detected, and an automated response being executed.
+
+Mode switching
+
+Users must be able to switch modes through the dashboard.
+
+Implement safe mode transitions:
+
+1. Validate the requested mode.
+2. Persist the new configuration.
+3. Initialize or disable the appropriate services.
+4. Ensure event listeners are not registered multiple times.
+5. Avoid gaps in critical protection during a transition.
+6. Confirm that the resulting runtime state matches the saved configuration.
+7. Report any failed initialization.
+
+Do not restart the entire bot unnecessarily when a safe runtime transition is possible.
+
+If the existing architecture requires a restart for a specific change, explain that requirement clearly.
+
+Add startup reconciliation so the services activated after a restart match the saved mode.
+
+---
+
+6. MAKE EVERY SECURITY FEATURE CONFIGURABLE
+
+Users must be able to configure every supported security feature through the Security Dashboard.
+
+Audit all existing settings and identify options that are currently hardcoded or accessible only through code.
+
+Where appropriate, provide controls for:
+
+- Feature enablement.
+- Monitored events.
+- Detection thresholds.
+- Event aggregation windows.
+- Alert severity.
+- Automated response policies.
+- Notification destinations.
+- Trusted administrators.
+- Exemptions.
+- Lockdown behavior.
+- Recovery behavior.
+- Incident retention.
+- Monitoring verbosity.
+- Escalation rules.
+- Safe testing or diagnostic options.
+
+Do not expose meaningless settings simply to make the dashboard look complete.
+
+Each setting must have a defined effect on runtime behavior.
+
+Validate configuration values and enforce reasonable bounds.
+
+Use safe defaults, especially for destructive actions.
+
+Separate detection sensitivity from enforcement severity so that users can increase monitoring without automatically authorizing aggressive responses.
+
+For high-impact actions, provide clear explanations and explicit confirmation.
+
+---
+
+7. REPAIR THE EXPLAIN COMMAND
+
+The "/explain" command currently does not appear where expected, and it is missing from the help command.
+
+Investigate the command discovery, registration, and help-generation systems.
+
+Check:
+
+- Command implementation and registration.
+- Command discovery and loading.
+- Slash-command synchronization.
+- Prefix versus slash command behavior.
+- Command visibility and permission restrictions.
+- Help command data sources.
+- Duplicate command names.
+- Any filtering that accidentally excludes the command.
+
+Ensure "/explain" is registered, discoverable, and available to authorized users.
+
+If the project's conventions require a hybrid command, follow those conventions.
+
+Do not register duplicate commands or introduce a parallel command framework.
+
+7.1 Expand the explanation system
+
+The explain command must help ordinary server administrators understand Sentinel without requiring them to understand its internal architecture.
+
+Add explanation entries for every major security feature and mode, including:
+
+- Traditional anti-nuke protection.
+- The renamed observability system.
+- Hybrid Security.
+- Detection thresholds.
+- Event monitoring.
+- Incident severity.
+- Confidence and evidence.
+- Trusted administrators.
+- Exemptions.
+- Role hierarchy.
+- Effective bot permissions.
+- Lockdown.
+- Partial lockdown.
+- Automated responses.
+- Emergency escalation.
+- Recovery.
+- False positives.
+- Permission diagnostics.
+- Security logs.
+- Notification settings.
+- Setup requirements.
+
+Also explain any additional important systems discovered during the codebase audit.
+
+Each explanation should answer:
+
+1. What is it?
+2. Why does Sentinel use it?
+3. How does it work?
+4. When should an administrator enable or configure it?
+5. What are its limitations?
+6. Where can the administrator configure it?
+
+Provide useful examples where they improve understanding.
+
+Support concise topic-based explanations and helpful unknown-topic suggestions.
+
+Use clear language rather than unexplained technical terminology.
+
+7.2 Integrate explain with help
+
+The help command must list "/explain".
+
+Ensure the help command reflects the actual registered commands rather than maintaining a separate, outdated hardcoded list.
+
+Keep the help output consistent with Sentinel's existing design language.
+
+---
+
+8. CENTRALIZE EMOJIS, COLORS, AND IMAGES
+
+This requirement applies throughout the affected code.
+
+Use the existing configuration files as the source of truth.
+
+- Emojis: existing emoji configuration files.
+- Colors: existing color configuration files.
+- Images: existing image configuration files.
+
+Inspect the actual filenames, formats, schemas, and access patterns before editing anything.
+
+Do not assume the same configuration file exists in every directory.
+
+Do not introduce hardcoded emoji strings, color values, or image URLs into new or modified user-facing security interfaces when the corresponding configuration entry should be used.
+
+Examples of places to audit:
+
+- Security Dashboard.
+- Setup command.
+- Lockdown command.
+- Explain command.
+- Help command.
+- Permission diagnostics.
+- Observability alerts.
+- Incident notifications.
+- Error messages.
+- Confirmation prompts.
+- Success messages.
+
+If a required configuration value is missing, add it using the project's existing conventions.
+
+Use a sensible fallback only where the established configuration architecture supports it.
+
+Do not duplicate the same configuration across multiple files unnecessarily.
+
+Keep existing configuration keys and callers compatible.
+
+---
+
+9. DESIGN AND USABILITY REQUIREMENTS
+
+Sentinel is a premium security bot. The interface must look trustworthy, polished, and intentionally designed.
+
+Use the existing Sentinel visual direction:
+
+- Black or dark backgrounds.
+- Minimal blue accents using the configured color palette.
+- Clear typography and information hierarchy.
+- Compact layouts.
+- Consistent spacing.
+- Restrained use of emojis.
+- Clear distinctions between normal, warning, critical, and successful states.
+
+Do not use excessive decorative elements, generic walls of text, or unnecessary glassmorphism.
+
+Avoid displaying every internal subsystem on the initial dashboard.
+
+Use separate sections, buttons, and select menus so administrators can navigate the system progressively.
+
+Use descriptive labels instead of vague labels such as "System 2", "Advanced Engine", or unexplained internal module names.
+
+The dashboard should make it easy to answer:
+
+- What is currently protecting my server?
+- Which security mode is active?
+- What is Sentinel monitoring?
+- What happens when a threat is detected?
+- What requires my attention?
+- Which settings can I change?
+- What happened during the last incident?
+
+Make warnings concise, specific, and actionable.
+
+---
+
+10. RELIABILITY, PERMISSIONS, AND SECURITY
+
+Because Sentinel is a security bot, correctness is more important than the number of features.
+
+Implement the following safeguards:
+
+- Authorize dashboard interactions server-side.
+- Revalidate permissions before sensitive actions.
+- Never trust client-provided role IDs, user IDs, or configuration values without validation.
+- Prevent duplicate event listeners.
+- Make emergency operations idempotent.
+- Use bounded event windows and appropriate rate limiting.
+- Avoid unbounded task creation during event bursts.
+- Handle Discord API rate limits and failures.
+- Keep detection, alerting, and enforcement logically separated.
+- Preserve incident evidence needed for later investigation.
+- Avoid repeated notifications for the same incident.
+- Ensure one failed response does not silently disable unrelated protection.
+- Recover cleanly from database or Discord API failures.
+- Avoid destructive database migrations.
+- Preserve existing configurations during upgrades.
+- Do not expose sensitive webhook URLs or credentials in dashboards, logs, or messages.
+
+When responding to a large-scale destructive event, prioritize containment where the configured policy permits it. Do not wait for optional administrative review before executing an already-authorized emergency response.
+
+At the same time, do not allow an uncertain detection to trigger arbitrary punishment.
+
+Use explicit severity thresholds and configured response policies.
+
+Remember that Discord's API and permission model impose limitations. Do not promise that Sentinel can reverse every destructive action or prevent actions that Discord does not allow it to intercept.
+
+---
+
+11. TESTING REQUIREMENTS
+
+Do not declare this task complete merely because the commands render or the bot starts.
+
+Inspect and test the actual implementations.
+
+Permission tests
+
+Cover:
+
+- Administrator permission.
+- Individual required permissions without Administrator.
+- Missing permissions.
+- Channel-specific permission overwrites where relevant.
+- Correct bot-member resolution.
+- Role hierarchy.
+- Managed roles.
+- Roles above the bot.
+- Valid manageable roles.
+- Genuine Discord API restrictions.
+
+Command tests
+
+Verify:
+
+- "/setup" displays accurate diagnostics.
+- "/security" opens the new Security Dashboard.
+- "/lockdown" reports actual action outcomes.
+- "/explain" is registered and usable.
+- Help includes "/explain".
+- Existing commands remain functional.
+
+Mode tests
+
+Verify all three modes:
+
+- Traditional anti-nuke runs independently.
+- Automatic observability runs independently.
+- Hybrid runs both systems concurrently.
+- Switching modes does not create duplicate listeners.
+- Restarting the bot restores the selected mode.
+- Failed service initialization is reported correctly.
+- Repeated events do not create duplicate incidents or responses unnecessarily.
+
+Dashboard tests
+
+Verify:
+
+- Every displayed control has a working handler.
+- Unauthorized interactions are rejected.
+- Configuration changes persist.
+- Navigation works.
+- Back and home controls work.
+- Invalid settings are rejected.
+- Partial failures are displayed accurately.
+- Missing configuration values do not crash the dashboard.
+
+Regression tests
+
+Run the available test suite and relevant checks for the existing Python implementation.
+
+Use the actual project's dependencies and supported APIs.
+
+Do not claim tests passed if they were not run.
+
+If a test cannot run because of a missing dependency, unavailable Discord credentials, or another environmental limitation, report that limitation explicitly.
+
+---
+
+12. IMPLEMENTATION WORKFLOW
+
+Follow this sequence.
+
+Phase 1 — Audit
+
+Inspect the relevant commands, services, event handlers, database models, permission utilities, mode configuration, help system, and UI builders.
+
+Identify the root causes of the false permission warnings and missing commands.
+
+Phase 2 — Permission repairs
+
+Fix the shared permission and role-hierarchy logic first.
+
+Ensure all affected commands use the corrected implementation.
+
+Phase 3 — Command repairs
+
+Fix setup, lockdown, explain, and help registration.
+
+Phase 4 — Mode activation
+
+Enable automatic observability and hybrid mode, preserving their original intended behavior.
+
+Add reliable runtime initialization and startup reconciliation.
+
+Phase 5 — Security Dashboard
+
+Build the new dashboard and connect it to actual configuration, detection, incident, and recovery services.
+
+Phase 6 — Configuration consistency
+
+Ensure emojis, colors, and images are loaded from the existing configuration files.
+
+Add missing configuration entries using established conventions.
+
+Phase 7 — Tests and verification
+
+Run the relevant tests, inspect the diffs, and verify that the implementation matches the requested behavior.
+
+Fix regressions discovered during testing.
+
+---
+
+13. FINAL ACCEPTANCE CRITERIA
+
+Do not consider the task complete until you have verified the following:
+
+- [ ] Administrator is correctly recognized by permission checks.
+- [ ] False missing-permission warnings are fixed at their source.
+- [ ] Role manageability is calculated correctly.
+- [ ] Genuine hierarchy restrictions remain visible.
+- [ ] Setup displays accurate diagnostics.
+- [ ] Security opens the new complete dashboard.
+- [ ] Lockdown reports actual outcomes and failures.
+- [ ] Recovery is safe and authorized.
+- [ ] "/explain" is registered and usable.
+- [ ] Help includes "/explain".
+- [ ] Explanation topics cover the major security systems.
+- [ ] Traditional anti-nuke mode works independently.
+- [ ] Automatic observability mode is enabled and works independently.
+- [ ] Hybrid mode runs both systems concurrently.
+- [ ] Mode transitions are safe.
+- [ ] The selected mode persists across restarts.
+- [ ] Every supported security feature can be configured through the dashboard.
+- [ ] Buttons, select menus, and modals have working handlers.
+- [ ] Emoji usage follows the existing emoji configuration.
+- [ ] Colors follow the existing color configuration.
+- [ ] Images follow the existing image configuration.
+- [ ] Existing database records and configurations are preserved.
+- [ ] Relevant tests have been run and their results reported.
+- [ ] No unrelated functionality has been broken.
+
+Final instruction
+
+Be precise and methodical.
+
+Do not rewrite the entire project unnecessarily. Do not invent SDK methods, database fields, configuration schemas, or service interfaces. Inspect the actual implementation and adapt the changes to the existing architecture.
+
+Fix the root causes rather than hiding symptoms.
+
+Prioritize permission correctness, reliable emergency protection, clear user-facing explanations, and a fully functional dashboard.
+
+At the end, provide a concise implementation report containing:
+
+1. The root causes discovered.
+2. The files changed.
+3. The permission and hierarchy fixes made.
+4. The commands repaired.
+5. The new dashboard sections and their implemented functionality.
+6. The observability system's new user-facing name.
+7. How all three modes behave.
+8. The tests executed and their actual results.
+9. Any remaining limitations or work that requires a live Discord environment.
+
+Never claim a feature works merely because its code exists. Verify the behavior wherever testing is possible.

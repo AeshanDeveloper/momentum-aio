@@ -1713,7 +1713,6 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 _handle_review,
             )
             from core.security.protection_service import security_protection_service
-            from core.security.antinuke import AntiNukeManager
 
             parts = custom_id.split(":")
             act = parts[1] if len(parts) > 1 else "status"
@@ -1769,8 +1768,6 @@ async def execute(ctx: Any, interaction: discord.Interaction):
             from plugins.MomentumOneToolkit.commands.security.security import build_security_hub_view
             from plugins.MomentumOneToolkit.commands.security.antinuke import build_dashboard_view
             from plugins.MomentumOneToolkit.commands.security.lockdown import _handle_status, _handle_posture, _handle_trigger
-            from plugins.MomentumOneToolkit.commands.security.explain import build_explain_container
-            from core.security.antinuke import AntiNukeManager, AntiNukeConstants
             from core.security.protection_service import security_protection_service
 
             parts = custom_id.split(":")

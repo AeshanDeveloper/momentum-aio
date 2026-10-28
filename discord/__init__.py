@@ -143,6 +143,7 @@ Color = Colour
 
 class Permissions:
     _FLAGS: Dict[str, int] = {
+        "create_instant_invite": 1 << 0,
         "kick_members": 1 << 1,
         "ban_members": 1 << 2,
         "administrator": 1 << 3,
@@ -150,44 +151,107 @@ class Permissions:
         "manage_guild": 1 << 5,
         "add_reactions": 1 << 6,
         "view_audit_log": 1 << 7,
+        "priority_speaker": 1 << 8,
+        "stream": 1 << 9,
         "view_channel": 1 << 10,
         "send_messages": 1 << 11,
+        "send_tts_messages": 1 << 12,
         "manage_messages": 1 << 13,
         "embed_links": 1 << 14,
         "attach_files": 1 << 15,
         "read_messages": 1 << 16,
+        "read_message_history": 1 << 16,
         "mention_everyone": 1 << 17,
+        "use_external_emojis": 1 << 18,
+        "view_guild_insights": 1 << 19,
         "connect": 1 << 20,
         "speak": 1 << 21,
+        "mute_members": 1 << 22,
+        "deafen_members": 1 << 23,
+        "move_members": 1 << 24,
+        "use_vad": 1 << 25,
+        "change_nickname": 1 << 26,
+        "manage_nicknames": 1 << 27,
         "manage_roles": 1 << 28,
         "manage_webhooks": 1 << 29,
+        "moderate_members": 1 << 40,
     }
 
-    def __init__(self, permissions: Optional[int] = None, **kwargs):
-        if permissions is not None:
-            self.value = int(permissions)
-            for name, bit in self._FLAGS.items():
-                setattr(self, name, bool(self.value & bit))
-            for k, v in kwargs.items():
+    def __init__(self, permissions: Optional[Union[int, "Permissions"]] = None, **kwargs: Any):
+        self._raw_values: Dict[str, bool] = {}
+        if isinstance(permissions, Permissions):
+            self.value = permissions.value
+            for k, v in permissions._raw_values.items():
+                self._raw_values[k] = v
                 setattr(self, k, v)
+        elif permissions is not None:
+            self.value = int(permissions)
+            is_admin = bool(self.value & self._FLAGS["administrator"])
+            for name, bit in self._FLAGS.items():
+                val = is_admin or bool(self.value & bit)
+                self._raw_values[name] = val
+                setattr(self, name, val)
         else:
             self.value = 0
             for name, bit in self._FLAGS.items():
                 if name in kwargs:
                     val = bool(kwargs[name])
+                    self._raw_values[name] = val
                     setattr(self, name, val)
                     if val:
                         self.value |= bit
                 else:
+                    self._raw_values[name] = False
                     setattr(self, name, False)
 
             if not kwargs:
                 self.send_messages = True
                 self.view_channel = True
+                self._raw_values["send_messages"] = True
+                self._raw_values["view_channel"] = True
                 self.value = self._FLAGS["send_messages"] | self._FLAGS["view_channel"]
 
-            for k, v in kwargs.items():
-                setattr(self, k, v)
+        for k, v in kwargs.items():
+            setattr(self, k, bool(v))
+            self._raw_values[k] = bool(v)
+            if k in self._FLAGS and v:
+                self.value |= self._FLAGS[k]
+
+        # In Discord, administrator grants ALL individual permissions
+        if getattr(self, "administrator", False):
+            for name, bit in self._FLAGS.items():
+                setattr(self, name, True)
+                self._raw_values[name] = True
+                self.value |= bit
+
+    def __getattr__(self, name: str) -> bool:
+        if name in self._FLAGS:
+            if self.__dict__.get("administrator", False) or self._raw_values.get("administrator", False):
+                return True
+            return False
+        raise AttributeError(f"'Permissions' object has no attribute '{name}'")
+
+    @classmethod
+    def all(cls) -> "Permissions":
+        p = cls(0)
+        p.administrator = True
+        for name, bit in cls._FLAGS.items():
+            setattr(p, name, True)
+            p._raw_values[name] = True
+            p.value |= bit
+        return p
+
+    @classmethod
+    def none(cls) -> "Permissions":
+        p = cls(0)
+        p.administrator = False
+        p.send_messages = False
+        p.view_channel = False
+        for name in cls._FLAGS:
+            setattr(p, name, False)
+            p._raw_values[name] = False
+        p.value = 0
+        return p
 
 
 
@@ -433,18 +497,71 @@ class User(BaseItem):
         return Message()
 
 class Role(BaseItem):
-    def __init__(self, id: int = 0, name: str = "", position: int = 0, guild: Any = None):
+    def __init__(
+        self,
+        id: int = 0,
+        name: str = "",
+        position: int = 0,
+        guild: Any = None,
+        permissions: Optional[Union[int, Permissions]] = None,
+        managed: bool = False,
+        tags: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(id, name)
-        self.position = position
-        self.permissions = Permissions()
-        self.managed = False
+        self.position = int(position)
+        if isinstance(permissions, Permissions):
+            self.permissions = permissions
+        elif permissions is not None:
+            self.permissions = Permissions(int(permissions))
+        else:
+            self.permissions = Permissions(0)
+        self.managed = bool(managed)
+        self.tags = tags or {}
         self.mention = f"<@&{id}>"
         self.guild = guild
         self._client = None
-    def is_default(self): return self.position == 0
+
+    def is_default(self) -> bool:
+        if self.position == 0:
+            return True
+        if self.guild and hasattr(self.guild, "id"):
+            return self.id == self.guild.id
+        return self.name == "@everyone"
+
+    def __lt__(self, other: Any) -> bool:
+        if not isinstance(other, Role):
+            return NotImplemented
+        return (self.position, self.id) < (other.position, other.id)
+
+    def __le__(self, other: Any) -> bool:
+        if not isinstance(other, Role):
+            return NotImplemented
+        return (self.position, self.id) <= (other.position, other.id)
+
+    def __gt__(self, other: Any) -> bool:
+        if not isinstance(other, Role):
+            return NotImplemented
+        return (self.position, self.id) > (other.position, other.id)
+
+    def __ge__(self, other: Any) -> bool:
+        if not isinstance(other, Role):
+            return NotImplemented
+        return (self.position, self.id) >= (other.position, other.id)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Role):
+            return False
+        return self.id == other.id
+
+    def __str__(self) -> str:
+        return self.name or f"Role({self.id})"
+
     async def edit(self, *, permissions: Optional[Any] = None, name: Optional[str] = None, reason: Optional[str] = None, **kwargs):
         if permissions is not None:
-            self.permissions = permissions
+            if isinstance(permissions, Permissions):
+                self.permissions = permissions
+            else:
+                self.permissions = Permissions(int(permissions))
         if name is not None:
             self.name = name
         for k, v in kwargs.items():
@@ -456,11 +573,59 @@ class Member(User):
     def __init__(self, id: int = 0, name: str = "", guild: Any = None):
         super().__init__(id, name)
         self.guild = guild
-        self.roles = []
-        self.guild_permissions = Permissions()
-        self.top_role = Role(0, "default", 0)
-    async def add_roles(self, *roles, **kwargs): pass
-    async def remove_roles(self, *roles, **kwargs): pass
+        self.roles: List[Role] = []
+        self._guild_permissions: Optional[Permissions] = None
+        self._top_role: Optional[Role] = None
+
+    @property
+    def top_role(self) -> Role:
+        if self._top_role is not None:
+            return self._top_role
+        if self.roles:
+            return max(self.roles, key=lambda r: (getattr(r, "position", 0), getattr(r, "id", 0)))
+        if self.guild and hasattr(self.guild, "default_role"):
+            return self.guild.default_role
+        return Role(0, "@everyone", 0, guild=self.guild)
+
+    @top_role.setter
+    def top_role(self, r: Any) -> None:
+        self._top_role = r
+
+    @property
+    def guild_permissions(self) -> Permissions:
+        if self._guild_permissions is not None:
+            return self._guild_permissions
+        if not self.guild:
+            return Permissions()
+        if getattr(self.guild, "owner_id", None) and self.guild.owner_id == self.id:
+            return Permissions.all()
+        val = 0
+        if hasattr(self.guild, "default_role") and self.guild.default_role:
+            val |= getattr(self.guild.default_role.permissions, "value", 0)
+        for r in self.roles:
+            val |= getattr(r.permissions, "value", 0)
+        return Permissions(val)
+
+    @guild_permissions.setter
+    def guild_permissions(self, p: Any) -> None:
+        if isinstance(p, Permissions):
+            self._guild_permissions = p
+        elif p is not None:
+            self._guild_permissions = Permissions(int(p))
+        else:
+            self._guild_permissions = None
+
+    async def add_roles(self, *roles, **kwargs):
+        for r in roles:
+            if r and r not in self.roles:
+                self.roles.append(r)
+        self._top_role = None
+
+    async def remove_roles(self, *roles, **kwargs):
+        to_remove = set(roles)
+        self.roles = [r for r in self.roles if r not in to_remove]
+        self._top_role = None
+
     async def kick(self, **kwargs): pass
     async def ban(self, **kwargs): pass
     async def timeout(self, *args, **kwargs): pass
@@ -1349,13 +1514,45 @@ class Client:
             guild.roles = []
             for r_data in d.get("roles", []):
                 r_id = int(r_data["id"])
-                role = Role(id=r_id, name=r_data.get("name", ""), position=r_data.get("position", 0), guild=guild)
+                perm_val = int(r_data.get("permissions", 0)) if r_data.get("permissions") is not None else 0
+                r_pos = int(r_data.get("position", 0))
+                r_name = r_data.get("name", "")
+                r_managed = bool(r_data.get("managed", False))
+                r_tags = r_data.get("tags") or {}
+                role = Role(
+                    id=r_id,
+                    name=r_name,
+                    position=r_pos,
+                    guild=guild,
+                    permissions=perm_val,
+                    managed=r_managed,
+                    tags=r_tags,
+                )
                 role._client = self
                 guild.roles.append(role)
 
             # Bot member
             me = Member(id=self.user.id, name=self.user.name, guild=guild)
             me.bot = True
+
+            # Find bot's assigned roles in d.get("members", [])
+            bot_rids = []
+            for m_data in d.get("members", []):
+                if int(m_data.get("user", {}).get("id", 0)) == self.user.id:
+                    bot_rids = [int(rid) for rid in m_data.get("roles", [])]
+                    break
+
+            # If bot was not found in members chunk, check for managed bot integration role
+            if not bot_rids:
+                for r in guild.roles:
+                    if r.managed and (str(r.tags.get("bot_id", "")) == str(self.user.id) or self.user.name.lower() in r.name.lower()):
+                        bot_rids.append(r.id)
+
+            for rid in bot_rids:
+                r = guild.get_role(rid)
+                if r and r not in me.roles:
+                    me.roles.append(r)
+
             guild.me = me
 
             # Dispatch on_guild_join ONLY on genuine new guild joins (never on startup or existing guilds)
@@ -1429,11 +1626,25 @@ class Client:
             channel = (guild.get_channel(channel_id) if guild else None) or TextChannel(id=channel_id or 0)
             channel._client = self
 
-            user_data = d.get("member", {}).get("user") or d.get("user") or {}
+            # If Discord sends app_permissions (bot's permissions in guild), apply to guild.me
+            app_perms = d.get("app_permissions")
+            if app_perms is not None and guild and guild.me:
+                guild.me.guild_permissions = Permissions(int(app_perms))
+
+            member_data = d.get("member", {})
+            user_data = member_data.get("user") or d.get("user") or {}
             user_id = int(user_data.get("id", 0))
             user_name = user_data.get("username", "Unknown")
-            user = Member(id=user_id, name=user_name, guild=guild) if guild else User(id=user_id, name=user_name)
-            user.bot = bool(user_data.get("bot", False))
+            if guild:
+                user = Member(id=user_id, name=user_name, guild=guild)
+                user.bot = bool(user_data.get("bot", False))
+                for rid in member_data.get("roles", []):
+                    r = guild.get_role(int(rid))
+                    if r: user.roles.append(r)
+                if member_data.get("permissions") is not None:
+                    user.guild_permissions = Permissions(int(member_data["permissions"]))
+            else:
+                user = User(id=user_id, name=user_name, bot=bool(user_data.get("bot", False)))
 
             interaction = Interaction(id=int_id, type=int_type, guild=guild, user=user)
             interaction.token = token

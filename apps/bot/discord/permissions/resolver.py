@@ -155,3 +155,131 @@ def parse_duration(input_str: Optional[str]) -> Optional[float]:
         return time.time() + sec
 
     return None
+
+
+def get_effective_bot_permissions(guild: Any) -> Any:
+    """
+    Safely resolves the bot member's effective guild permissions,
+    correctly accounting for Administrator granting all capabilities.
+    """
+    if not guild:
+        return None
+    me = getattr(guild, "me", None)
+    if not me:
+        return None
+    perms = getattr(me, "guild_permissions", None)
+    return perms
+
+
+def evaluate_role_manageability(bot_member: Any, role: Any) -> Tuple[bool, str, str]:
+    """
+    Evaluates whether the bot can manage/edit a target role in accordance with Discord API rules.
+    Returns: (can_manage: bool, status_code: str, detailed_reason: str)
+
+    Status codes:
+      - 'manageable': The bot has permissions and position to manage this role.
+      - 'blocked_by_hierarchy': Target role position is >= bot's top role position.
+      - 'managed_role': The role is controlled by an external bot or Discord integration.
+      - 'missing_permission': Bot lacks Manage Roles (and Administrator) permission.
+      - 'api_restriction': Role is bot's own top role or server owner's uneditable role.
+    """
+    if not bot_member:
+        return False, "api_restriction", "Bot member context is unavailable."
+    if not role:
+        return False, "api_restriction", "Target role is None."
+
+    guild = getattr(bot_member, "guild", None) or getattr(role, "guild", None)
+    bot_perms = getattr(bot_member, "guild_permissions", None)
+    has_manage_roles = False
+    if bot_perms:
+        has_manage_roles = getattr(bot_perms, "manage_roles", False) or getattr(bot_perms, "administrator", False)
+
+    if not has_manage_roles:
+        return False, "missing_permission", "Bot lacks 'Manage Roles' permission (and Administrator)."
+
+    # Default @everyone role can be modified by anyone with Manage Roles
+    is_default = getattr(role, "is_default", lambda: False)() or (guild and role.id == getattr(guild, "id", None))
+    if is_default:
+        return True, "manageable", "Default @everyone role permissions can be modified."
+
+    # External integration / bot managed role
+    if getattr(role, "managed", False):
+        return False, "managed_role", f"Role '{role.name}' is managed by an external integration or application."
+
+    bot_top_role = getattr(bot_member, "top_role", None)
+    if not bot_top_role:
+        return False, "blocked_by_hierarchy", "Bot has no assigned roles in this server."
+
+    # Bot's own top role cannot be edited by the bot
+    if role.id == bot_top_role.id:
+        return False, "api_restriction", "Bot cannot modify its own highest role (Shielded)."
+
+    # Discord Role Hierarchy Rule: Bot can only manage roles strictly lower than its top role
+    if role.position >= bot_top_role.position:
+        return False, "blocked_by_hierarchy", (
+            f"Role '{role.name}' (pos {role.position}) is higher than or equal to bot's top role "
+            f"'{bot_top_role.name}' (pos {bot_top_role.position})."
+        )
+
+    return True, "manageable", f"Role '{role.name}' is manageable by the bot."
+
+
+def get_role_diagnostics(guild: Any) -> Dict[str, Any]:
+    """
+    Generates comprehensive role hierarchy and manageability diagnostics for a guild.
+    """
+    if not guild:
+        return {
+            "safe": False,
+            "bot_top_role": None,
+            "total_roles": 0,
+            "manageable_count": 0,
+            "blocked_count": 0,
+            "managed_count": 0,
+            "missing_perms": True,
+            "manageable_roles": [],
+            "blocked_roles": [],
+            "managed_roles": [],
+        }
+
+    me = getattr(guild, "me", None)
+    roles = getattr(guild, "roles", [])
+    bot_top_role = getattr(me, "top_role", None) if me else None
+
+    manageable = []
+    blocked = []
+    managed = []
+
+    for r in roles:
+        if r.is_default() if hasattr(r, "is_default") else r.position == 0:
+            continue
+        can_mod, status, reason = evaluate_role_manageability(me, r)
+        if can_mod:
+            manageable.append((r, reason))
+        elif status == "managed_role":
+            managed.append((r, reason))
+        elif status == "blocked_by_hierarchy":
+            blocked.append((r, reason))
+        else:
+            blocked.append((r, reason))
+
+    bot_perms = getattr(me, "guild_permissions", None) if me else None
+    has_admin = getattr(bot_perms, "administrator", False) if bot_perms else False
+    has_manage_roles = (getattr(bot_perms, "manage_roles", False) or has_admin) if bot_perms else False
+
+    is_safe = (len(blocked) == 0 and has_manage_roles)
+
+    return {
+        "safe": is_safe,
+        "bot_top_role": bot_top_role,
+        "has_admin": has_admin,
+        "has_manage_roles": has_manage_roles,
+        "total_roles": len(roles),
+        "manageable_count": len(manageable),
+        "blocked_count": len(blocked),
+        "managed_count": len(managed),
+        "manageable_roles": manageable,
+        "blocked_roles": blocked,
+        "managed_roles": managed,
+    }
+

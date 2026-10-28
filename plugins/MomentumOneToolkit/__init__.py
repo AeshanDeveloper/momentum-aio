@@ -17,6 +17,8 @@ from .commands.moderation import announce, channel, command_manage
 from .commands.security import (
     antinuke,
     setup as sec_setup,
+    security,
+    explain,
     whitelist,
     unwhitelist,
     punishment,

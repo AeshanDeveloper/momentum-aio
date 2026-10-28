@@ -111,37 +111,9 @@ class EmergencyLockdownManager:
         Validates if bot can edit permissions of a specific role according to Discord hierarchy.
         Returns (can_modify, reason).
         """
-        if not bot_member:
-            return False, "Bot member context unavailable"
-        if not role:
-            return False, "Target role is None"
-
-        # Default @everyone role can be modified by anyone with manage_roles
-        if getattr(role, "is_default", lambda: False)() or getattr(role, "id", None) == getattr(getattr(bot_member, "guild", None), "id", -1):
-            bot_perms = getattr(bot_member, "guild_permissions", Permissions())
-            if getattr(bot_perms, "manage_roles", False) or getattr(bot_perms, "administrator", False):
-                return True, "Default role editable with manage_roles"
-            return False, "Bot lacks manage_roles to edit @everyone"
-
-        # Bot's own top role or roles equal/higher in position cannot be modified
-        bot_top_role = getattr(bot_member, "top_role", None)
-        if not bot_top_role:
-            return False, "Bot has no assigned roles"
-
-        if role.id == bot_top_role.id:
-            return False, "Cannot modify bot's own highest role (Shielded)"
-
-        if role.position >= bot_top_role.position:
-            return False, f"Role position ({role.position}) is higher than or equal to bot's top role ({bot_top_role.position})"
-
-        if getattr(role, "managed", False):
-            return False, "Role is managed by an external integration"
-
-        bot_perms = getattr(bot_member, "guild_permissions", Permissions())
-        if not (getattr(bot_perms, "manage_roles", False) or getattr(bot_perms, "administrator", False)):
-            return False, "Bot lacks manage_roles permission"
-
-        return True, "Role is editable by bot"
+        from apps.bot.discord.permissions.resolver import evaluate_role_manageability
+        can_mod, status, reason = evaluate_role_manageability(bot_member, role)
+        return can_mod, reason
 
     def can_modify_channel_overwrites(self, bot_member: Any) -> Tuple[bool, str]:
         """Validates if bot has permissions to manage channel overwrites."""
