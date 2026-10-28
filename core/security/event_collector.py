@@ -163,7 +163,8 @@ class SecurityEventCollector:
 
             # Otherwise suppress duplicate signal
             event.status = SecurityEventStatus.SUPPRESSED_DUPLICATE
-            return existing_event
+            event.event_id = existing_event.event_id
+            return event
 
         # Check whitelist if actor is present
         if event.actor_id and event.is_whitelisted_actor is None:

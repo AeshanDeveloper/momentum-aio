@@ -430,8 +430,9 @@ class SecurityCommunicationService:
         incident.add_decision(
             actor_id=caller_id,
             actor_name=str(user),
-            decision_type=f"clarification_{choice}",
+            decision_type=ReviewDecisionType.CLARIFICATION_STATEMENT,
             reason=f"Administrator answered clarification request: {choice_label}",
+            metadata={"choice": choice, "choice_label": choice_label},
         )
 
         # Store in clarification history
@@ -561,6 +562,75 @@ class SecurityCommunicationService:
                 await self._send_fallback_channel(guild, policy.fallback_channel_id, embed=embed, view=view)
 
         return {"incident_id": incident.incident_id, "sent": sent, "failed": failed}
+
+    # 2b. Critical Emergency Incident Notification
+    async def notify_critical_incident(
+        self,
+        guild: Any,
+        incident: Incident,
+        policy: Optional[SecurityResponsePolicy] = None,
+        lockdown_record: Optional[LockdownRecord] = None,
+    ) -> Dict[str, Any]:
+        """
+        Dispatches emergency alerts to recovery admins and routes to fallback channel if DMs fail.
+        """
+        gid = str(getattr(guild, "id", incident.guild_id))
+        pol = policy or self._get_policy(gid)
+        client = getattr(self.bot_client, "client", self.bot_client)
+
+        embed = discord.Embed(
+            title=f"🚨 Sentinel™ Emergency Threat Alert: `{incident.incident_id}`",
+            description=(
+                f"Autonomous emergency protection was activated on **{getattr(guild, 'name', f'Server {gid}')}**.\n\n"
+                f"**Threat:** {incident.title}\n"
+                f"**Severity:** `{incident.severity.upper()}` | **Confidence:** `{incident.confidence.upper()}`\n"
+                f"**Observed Events:** `{incident.event_count}`\n"
+                f"**Attribution:** `{incident.attribution_confidence.upper()}`\n\n"
+                f"Designated recovery staff may use the interactive controls below to review evidence or initiate safe restoration."
+            ),
+            color=discord.Color(get_color("danger", 0xED4245)),
+        )
+        embed.set_footer(
+            text=f"Sentinel™ Defense Engine • Policy: {pol.response_level.upper()}",
+            icon_url=IMAGES.get("sentinel_avatar", ""),
+        )
+
+        from core.security.admin_notifier import EmergencyRecoveryView
+        view = EmergencyRecoveryView(incident=incident, lockdown_record=lockdown_record, policy=pol)
+
+        recipients: List[str] = []
+        if pol.recovery_owner_id:
+            recipients.append(str(pol.recovery_owner_id))
+        for aid in pol.trusted_recovery_admin_ids:
+            if str(aid) not in recipients:
+                recipients.append(str(aid))
+
+        dms_sent = 0
+        dms_failed = 0
+        async with self._semaphore:
+            for uid in recipients:
+                ok = await self._send_dm(client, uid, embed, view)
+                if ok:
+                    dms_sent += 1
+                else:
+                    dms_failed += 1
+
+            fallback_channel_sent = False
+            if (dms_failed > 0 or dms_sent == 0) and pol.fallback_channel_id:
+                fallback_channel_sent = await self._send_fallback_channel(
+                    guild,
+                    pol.fallback_channel_id,
+                    content="🚨 **Sentinel Emergency Alert**: Critical security event detected. Review immediate details below.",
+                    embed=embed,
+                    view=view,
+                )
+
+        return {
+            "incident_id": incident.incident_id,
+            "dms_sent": dms_sent,
+            "dms_failed": dms_failed,
+            "fallback_channel_sent": fallback_channel_sent,
+        }
 
     # 3. Lockdown Status and Recovery Updates
     async def send_lockdown_status_update(

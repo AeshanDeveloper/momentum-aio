@@ -8,22 +8,35 @@ from core.logging.logger import logger
 
 MOCK_DB_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".data", "local_db.json"))
 
+_mock_db_cache: Dict[str, List[Dict[str, Any]]] = {}
+_mock_db_loaded: bool = False
+
 def _load_mock_data() -> Dict[str, List[Dict[str, Any]]]:
+    global _mock_db_cache, _mock_db_loaded
+    if _mock_db_loaded:
+        return _mock_db_cache
     try:
         if os.path.isfile(MOCK_DB_FILE):
             with open(MOCK_DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                _mock_db_cache = json.load(f)
     except Exception:
-        pass
-    return {}
+        _mock_db_cache = {}
+    _mock_db_loaded = True
+    return _mock_db_cache
+
+_last_mock_disk_save: float = 0.0
 
 def _save_mock_data(collection_name: str, items: List[Dict[str, Any]]) -> None:
+    global _mock_db_cache, _last_mock_disk_save
+    _mock_db_cache[collection_name] = items
+    now = time.time()
+    if now - _last_mock_disk_save < 1.0:
+        return
+    _last_mock_disk_save = now
     try:
         os.makedirs(os.path.dirname(MOCK_DB_FILE), exist_ok=True)
-        data = _load_mock_data()
-        data[collection_name] = items
         with open(MOCK_DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=str)
+            json.dump(_mock_db_cache, f, default=str)
     except Exception:
         pass
 

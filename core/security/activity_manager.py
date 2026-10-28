@@ -205,14 +205,28 @@ class RollingWindowBucket:
             self._items.insert(idx, item)
 
         if len(self._items) > self._max_items:
-            self._items.pop(0)
+            del self._items[:len(self._items) - self._max_items]
 
     def prune(self, current_time: float, max_retention: Optional[float] = None) -> None:
         """Removes items older than max_retention."""
         retention = max_retention if max_retention is not None else self._max_retention_seconds
         cutoff = current_time - retention
-        while self._items and self._items[0].timestamp < cutoff:
-            self._items.pop(0)
+        if not self._items or self._items[0].timestamp >= cutoff:
+            return
+        dummy = ActivityItem(
+            timestamp=cutoff,
+            event_id="",
+            event_type="",
+            category="",
+            target_id=None,
+            target_name=None,
+            actor_id=None,
+            actor_name=None,
+            attribution_confidence="",
+            is_whitelisted=False,
+        )
+        idx = bisect.bisect_left(self._items, dummy)
+        del self._items[:idx]
 
     def get_items(self) -> List[ActivityItem]:
         """Returns a snapshot copy of all items currently in the bucket."""
@@ -573,6 +587,8 @@ class SecurityActivityManager:
     def set_guild_threshold(self, guild_id: str, threshold: ThresholdConfig) -> None:
         """Configures or overrides a specific threshold for a guild."""
         gid = str(guild_id)
+        if hasattr(self, "_guild_thresholds_cache"):
+            self._guild_thresholds_cache.pop(gid, None)
         if gid not in self._guild_threshold_overrides:
             self._guild_threshold_overrides[gid] = [t for t in self._default_thresholds if t.name != threshold.name]
             self._guild_threshold_overrides[gid].append(threshold)
@@ -582,17 +598,30 @@ class SecurityActivityManager:
 
     def set_guild_thresholds(self, guild_id: str, thresholds: List[ThresholdConfig]) -> None:
         """Replaces all active thresholds for a guild."""
-        self._guild_threshold_overrides[str(guild_id)] = list(thresholds)
+        gid = str(guild_id)
+        if hasattr(self, "_guild_thresholds_cache"):
+            self._guild_thresholds_cache.pop(gid, None)
+        self._guild_threshold_overrides[gid] = list(thresholds)
 
     def reset_guild_thresholds(self, guild_id: str) -> None:
         """Clears custom overrides, reverting guild to default thresholds."""
-        self._guild_threshold_overrides.pop(str(guild_id), None)
+        gid = str(guild_id)
+        self._guild_threshold_overrides.pop(gid, None)
+        if hasattr(self, "_guild_thresholds_cache"):
+            self._guild_thresholds_cache.pop(gid, None)
 
     def get_guild_thresholds(self, guild_id: str) -> List[ThresholdConfig]:
         """Returns the active threshold definitions for a guild."""
         gid = str(guild_id)
         if gid in self._guild_threshold_overrides:
             return list(self._guild_threshold_overrides[gid])
+
+        now = time.time()
+        if not hasattr(self, "_guild_thresholds_cache"):
+            self._guild_thresholds_cache = {}
+        cached = self._guild_thresholds_cache.get(gid)
+        if cached and (now - cached[0] < 30.0):
+            return list(cached[1])
 
         # Adapt from AntiNuke configuration if custom thresholds exist
         # Adapt from AntiNuke configuration ONLY if explicitly setup and configured
@@ -632,14 +661,19 @@ class SecurityActivityManager:
                                     )
                                     continue
                             adapted.append(th)
+                        self._guild_thresholds_cache[gid] = (now, adapted)
                         return adapted
         except Exception:
             pass
 
+        self._guild_thresholds_cache[gid] = (now, list(self._default_thresholds))
         return list(self._default_thresholds)
 
     def _purge_dedup_cache(self, current_time: float) -> None:
-        """Evicts expired deduplication keys."""
+        """Evicts expired deduplication keys periodically."""
+        if current_time - getattr(self, "_last_dedup_purge", 0.0) < 5.0 and len(self._seen_events) < 500:
+            return
+        self._last_dedup_purge = current_time
         cutoff = current_time - self._dedup_ttl
         expired = [k for k, (t, _) in self._seen_events.items() if t < cutoff]
         for k in expired:
@@ -798,35 +832,39 @@ class SecurityActivityManager:
 
             # Evaluate Actor-Level
             if actor_id and rule.scope in ("actor", "both"):
-                actor_summary = self.get_actor_summary(guild_id, actor_id, rule.category, rule.window_seconds)
-                if self._check_rule_match(rule, actor_summary):
-                    sig = self._create_emergency_signal(
-                        rule=rule,
-                        scope="actor",
-                        guild_id=guild_id,
-                        actor_id=actor_id,
-                        summary=actor_summary,
-                        event=event,
-                        current_time=current_time,
-                    )
-                    if sig:
-                        signals.append(sig)
+                ab = self._actor_buckets.get(guild_id, {}).get(actor_id, {}).get(rule.category)
+                if ab and len(ab) >= rule.count:
+                    actor_summary = self.get_actor_summary(guild_id, actor_id, rule.category, rule.window_seconds)
+                    if self._check_rule_match(rule, actor_summary):
+                        sig = self._create_emergency_signal(
+                            rule=rule,
+                            scope="actor",
+                            guild_id=guild_id,
+                            actor_id=actor_id,
+                            summary=actor_summary,
+                            event=event,
+                            current_time=current_time,
+                        )
+                        if sig:
+                            signals.append(sig)
 
             # Evaluate Guild-Level
             if rule.scope in ("guild", "both"):
-                guild_summary = self.get_guild_summary(guild_id, rule.category, rule.window_seconds)
-                if self._check_rule_match(rule, guild_summary):
-                    sig = self._create_emergency_signal(
-                        rule=rule,
-                        scope="guild",
-                        guild_id=guild_id,
-                        actor_id=actor_id if (actor_id and rule.scope == "guild") else None,
-                        summary=guild_summary,
-                        event=event,
-                        current_time=current_time,
-                    )
-                    if sig:
-                        signals.append(sig)
+                gb = self._guild_buckets.get(guild_id, {}).get(rule.category)
+                if gb and len(gb) >= rule.count:
+                    guild_summary = self.get_guild_summary(guild_id, rule.category, rule.window_seconds)
+                    if self._check_rule_match(rule, guild_summary):
+                        sig = self._create_emergency_signal(
+                            rule=rule,
+                            scope="guild",
+                            guild_id=guild_id,
+                            actor_id=actor_id if (actor_id and rule.scope == "guild") else None,
+                            summary=guild_summary,
+                            event=event,
+                            current_time=current_time,
+                        )
+                        if sig:
+                            signals.append(sig)
 
         return signals
 
@@ -861,17 +899,27 @@ class SecurityActivityManager:
         escalation_events: List[str] = []
 
         if actor_id:
-            perm_summary = self.get_actor_summary(guild_id, actor_id, ActivityCategory.PERMISSION_CHANGE, lookback_seconds)
-            role_assign_summary = self.get_actor_summary(guild_id, actor_id, ActivityCategory.DANGEROUS_ROLE_ASSIGN, lookback_seconds)
-            if perm_summary.count > 0 or role_assign_summary.count > 0:
-                recent_escalation = True
-                escalation_events.extend(perm_summary.event_ids + role_assign_summary.event_ids)
+            ab = self._actor_buckets.get(guild_id, {}).get(actor_id, {})
+            pb = ab.get(ActivityCategory.PERMISSION_CHANGE)
+            rb = ab.get(ActivityCategory.DANGEROUS_ROLE_ASSIGN)
+            if pb and len(pb) > 0:
+                perm_summary = self.get_actor_summary(guild_id, actor_id, ActivityCategory.PERMISSION_CHANGE, lookback_seconds)
+                if perm_summary.count > 0:
+                    recent_escalation = True
+                    escalation_events.extend(perm_summary.event_ids)
+            if rb and len(rb) > 0:
+                role_assign_summary = self.get_actor_summary(guild_id, actor_id, ActivityCategory.DANGEROUS_ROLE_ASSIGN, lookback_seconds)
+                if role_assign_summary.count > 0:
+                    recent_escalation = True
+                    escalation_events.extend(role_assign_summary.event_ids)
 
         if not recent_escalation:
-            guild_perm = self.get_guild_summary(guild_id, ActivityCategory.PERMISSION_CHANGE, lookback_seconds)
-            if guild_perm.count > 0:
-                recent_escalation = True
-                escalation_events.extend(guild_perm.event_ids)
+            gb = self._guild_buckets.get(guild_id, {}).get(ActivityCategory.PERMISSION_CHANGE)
+            if gb and len(gb) > 0:
+                guild_perm = self.get_guild_summary(guild_id, ActivityCategory.PERMISSION_CHANGE, lookback_seconds)
+                if guild_perm.count > 0:
+                    recent_escalation = True
+                    escalation_events.extend(guild_perm.event_ids)
 
         if not recent_escalation:
             return None

@@ -174,6 +174,44 @@ class IncidentConsensusManager:
         return subjects
 
     # Consensus Voting & Decision Submission
+    async def record_review_vote(
+        self,
+        incident_id: str,
+        reviewer_id: Union[str, int],
+        choice: str,
+        reviewer_member: Optional[Any] = None,
+        policy: Optional[SecurityResponsePolicy] = None,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Records a review vote from a reviewer member with runtime eligibility check.
+        """
+        uid_str = str(reviewer_id)
+        pol = policy or get_default_response_policy("0")
+
+        # Runtime authority and permissions check
+        if reviewer_member is not None:
+            perms = getattr(reviewer_member, "guild_permissions", None)
+            is_admin = getattr(perms, "administrator", False) if perms else False
+            is_trusted = pol.is_trusted_recovery_actor(uid_str) or pol.is_recovery_owner(uid_str)
+            if not is_admin and not is_trusted:
+                return {
+                    "success": False,
+                    "error": "unauthorized_reviewer",
+                    "message": "User does not have required administrative permissions."
+                }
+
+        guild = getattr(reviewer_member, "guild", None)
+        reviewer_name = getattr(reviewer_member, "name", str(reviewer_id))
+        return await self.submit_vote(
+            guild=guild,
+            incident_id=incident_id,
+            reviewer_id=reviewer_id,
+            reviewer_name=reviewer_name,
+            choice=choice,
+            reason=reason,
+        )
+
     async def submit_vote(
         self,
         guild: Any,

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import time
 import asyncio
+import threading
 from typing import Dict, Any, List, Optional, Set, Callable, Union
 
 import discord
@@ -300,6 +301,11 @@ class AdminNotifier:
     """
     _instance: Optional["AdminNotifier"] = None
 
+    def __init__(self):
+        import threading
+        self._last_alert_times: Dict[str, float] = {}
+        self._alert_lock = threading.Lock()
+
     @classmethod
     def get_instance(cls) -> "AdminNotifier":
         if cls._instance is None:
@@ -316,9 +322,26 @@ class AdminNotifier:
     ) -> Dict[str, Any]:
         """
         Dispatches emergency alert with interactive recovery view to trusted admins.
-        Falls back to secure logging channel if DMs fail.
+        Falls back to secure logging channel if DMs fail. Enforces notification storm suppression.
         """
         gid = str(guild.id if guild else incident.guild_id)
+        alert_key = f"{gid}:{incident.incident_id}"
+        now = time.time()
+        with getattr(self, "_alert_lock", threading.Lock()):
+            if not hasattr(self, "_last_alert_times"):
+                self._last_alert_times = {}
+            last = self._last_alert_times.get(alert_key, 0.0)
+            if now - last < 60.0:
+                logger.debug(f"[AdminNotifier] Suppressing notification storm for {alert_key}")
+                return {
+                    "incident_id": incident.incident_id,
+                    "dms_sent": 0,
+                    "dms_failed": 0,
+                    "fallback_sent": False,
+                    "suppressed": True,
+                }
+            self._last_alert_times[alert_key] = now
+
         pol = policy or get_default_response_policy(gid)
 
         embed = self._create_emergency_alert_embed(incident, lockdown_record, pol)

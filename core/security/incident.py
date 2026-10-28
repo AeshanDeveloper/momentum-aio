@@ -92,6 +92,7 @@ class ReviewDecisionType:
     REQUEST_INFO = "request_info"
     VOTE_CORRECTION = "vote_correction"
     QUORUM_REVOKED = "quorum_revoked"
+    CLARIFICATION_STATEMENT = "clarification_statement"
 
     ALL = {
         CONFIRM,
@@ -104,6 +105,7 @@ class ReviewDecisionType:
         REQUEST_INFO,
         VOTE_CORRECTION,
         QUORUM_REVOKED,
+        CLARIFICATION_STATEMENT,
     }
 
 
@@ -529,6 +531,11 @@ class Incident:
     def event_count(self) -> int:
         """Returns total correlated events or evidence count."""
         return len(self.signal_ids) or len(self.evidence_references) or 1
+
+    @property
+    def review_decisions(self) -> List[DecisionRecord]:
+        """Returns decision records capturing administrative review and consensus."""
+        return self.decision_history
 
     def add_signal(self, signal: ThreatSignal) -> None:
         """Merges a correlated ThreatSignal into this active incident."""
