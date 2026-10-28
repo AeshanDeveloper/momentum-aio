@@ -221,13 +221,19 @@ class EmergencyLockdownManager:
             # 4. Step B: Channel Overwrite Lockdown
             await self._apply_channel_lockdown(guild, bot_member, pol, is_shadow, record)
 
-            # 5. Determine Final Status (Partial vs Full Active)
+            # 5. Determine Final Status (Partial vs Full Active / Verified)
             record.update_summary()
             is_partial = record.summary.get("is_partial", False)
+            failed_count = record.summary.get("failed_api", 0)
+            verified_count = record.summary.get("verified", 0)
+            applied_count = record.summary.get("applied", 0)
+
             if is_shadow:
                 record.status = LockdownStatus.ACTIVE  # In shadow mode, marked active simulation
-            elif is_partial:
+            elif is_partial or failed_count > 0:
                 record.status = LockdownStatus.PARTIAL
+            elif verified_count > 0 and failed_count == 0:
+                record.status = LockdownStatus.VERIFIED
             else:
                 record.status = LockdownStatus.ACTIVE
 
@@ -238,16 +244,20 @@ class EmergencyLockdownManager:
 
             # Sync with Incident aggregate
             incident.status = IncidentStatus.CONTAINED
-            action_status = (
-                ActionExecutionStatus.SIMULATED_SHADOW_MODE
-                if is_shadow
-                else (ActionExecutionStatus.EXECUTED if record.status == LockdownStatus.ACTIVE else ActionExecutionStatus.ATTEMPTED)
-            )
+            if is_shadow:
+                action_status = ActionExecutionStatus.SIMULATED_SHADOW_MODE
+            elif record.status == LockdownStatus.VERIFIED:
+                action_status = ActionExecutionStatus.VERIFIED
+            elif record.status == LockdownStatus.ACTIVE:
+                action_status = ActionExecutionStatus.EXECUTED
+            else:
+                action_status = ActionExecutionStatus.ATTEMPTED
+
             incident.record_action(
                 action_type=ProtectiveActionType.EMERGENCY_LOCKDOWN,
                 status=action_status,
                 is_shadow_mode=is_shadow,
-                target_ids=[e.target_id for e in record.entries if e.status == JournalEntryStatus.APPLIED],
+                target_ids=[e.target_id for e in record.entries if e.status in (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED)],
                 details={
                     "lockdown_id": record.lockdown_id,
                     "status": record.status,
@@ -259,7 +269,7 @@ class EmergencyLockdownManager:
 
             logger.info(
                 f"[EmergencyLockdown] Completed lockdown {record.lockdown_id} for guild {gid} (Status: {record.status}, "
-                f"Shadow: {is_shadow}, Entries: {len(record.entries)}, Applied: {record.summary.get('applied', 0)}, "
+                f"Shadow: {is_shadow}, Entries: {len(record.entries)}, Applied: {applied_count}, Verified: {verified_count}, "
                 f"Skipped Hierarchy: {record.summary.get('skipped_hierarchy', 0)})"
             )
             return record
@@ -388,7 +398,7 @@ class EmergencyLockdownManager:
                         permissions=new_permissions_obj,
                         reason=f"Sentinel Emergency Lockdown: Contained incident {record.incident_id}",
                     )
-                    entry.status = JournalEntryStatus.APPLIED
+                    entry.status = JournalEntryStatus.VERIFIED
                     record.entries.append(entry)
                 except Exception as err:
                     entry.status = JournalEntryStatus.FAILED_API
@@ -473,7 +483,7 @@ class EmergencyLockdownManager:
                         overwrite=new_ow,
                         reason=f"Sentinel Emergency Lockdown: Channel restricted for {record.incident_id}",
                     )
-                    entry.status = JournalEntryStatus.APPLIED
+                    entry.status = JournalEntryStatus.VERIFIED
                     record.entries.append(entry)
                 except Exception as err:
                     entry.status = JournalEntryStatus.FAILED_API
@@ -517,8 +527,8 @@ class EmergencyLockdownManager:
 
             # Process entries for restoration
             for entry in record.entries:
-                # Only restore entries that were actually APPLIED or previously FAILED_RESTORE
-                if entry.status not in (JournalEntryStatus.APPLIED, JournalEntryStatus.FAILED_RESTORE):
+                # Only restore entries that were actually APPLIED/VERIFIED or previously FAILED_RESTORE
+                if entry.status not in (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED, JournalEntryStatus.FAILED_RESTORE):
                     continue
 
                 if entry.target_type == "role":

@@ -119,8 +119,16 @@ class MockInteractionFollowup:
 
 class TestEmergencyLockdown(unittest.TestCase):
     def setUp(self):
+        from core.security.lockdown_journal import lockdown_journal_manager
+        lockdown_journal_manager._lockdowns.clear()
+        lockdown_journal_manager._guild_lockdowns.clear()
+
+        from database.database import _save_mock_data
+        _save_mock_data("security_lockdowns", [])
+
         self.journal = LockdownJournalManager()
         self.manager = EmergencyLockdownManager(journal_manager=self.journal)
+        self.manager._lockdown_history.clear()
         self.notifier = AdminNotifier()
         self.service = SecurityProtectionService(
             lockdown_mgr=self.manager,
@@ -237,7 +245,7 @@ class TestEmergencyLockdown(unittest.TestCase):
         # Moderator role (103) had ban_members and kick_members stripped
         mod_entry = next((e for e in record.entries if e.target_id == "103"), None)
         self.assertIsNotNone(mod_entry)
-        self.assertEqual(mod_entry.status, JournalEntryStatus.APPLIED)
+        self.assertIn(mod_entry.status, (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED))
         new_mod_perms = self.role_mod.permissions.value
         self.assertEqual(new_mod_perms & (1 << 2), 0)  # ban_members removed
         self.assertEqual(new_mod_perms & (1 << 1), 0)  # kick_members removed
@@ -245,7 +253,7 @@ class TestEmergencyLockdown(unittest.TestCase):
         # General channel (501) had send_messages denied for @everyone
         chan_entry = next((e for e in record.entries if e.secondary_id == "501"), None)
         self.assertIsNotNone(chan_entry)
-        self.assertEqual(chan_entry.status, JournalEntryStatus.APPLIED)
+        self.assertIn(chan_entry.status, (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED))
 
         # Exempt channel (502) was not modified
         sec_entry = next((e for e in record.entries if e.secondary_id == "502"), None)
@@ -391,7 +399,7 @@ class TestEmergencyLockdown(unittest.TestCase):
 
         mod_entry = next((e for e in record.entries if e.target_id == "103"), None)
         self.assertIsNotNone(mod_entry)
-        self.assertEqual(mod_entry.status, JournalEntryStatus.APPLIED)
+        self.assertIn(mod_entry.status, (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED))
         applied_val = mod_entry.applied_state["permissions_value"]
 
         # Simulate independent admin change post-lockdown
@@ -417,7 +425,7 @@ class TestEmergencyLockdown(unittest.TestCase):
     def test_bot_restart_hydration(self):
         """8. Active and partial lockdowns are successfully hydrated from storage across restarts."""
         record = LockdownRecord(
-            guild_id="12345",
+            guild_id="88881",
             incident_id="inc_hydrate",
             status=LockdownStatus.PARTIAL,
             is_shadow_mode=False,
@@ -431,32 +439,48 @@ class TestEmergencyLockdown(unittest.TestCase):
 
     def test_interrupted_recovery_retry(self):
         """9. Interrupted recovery procedure can be retried safely without losing state."""
-        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
-        incident = Incident(guild_id="12345", title="Incident for retry")
+        retry_guild = MockGuild(88882, "Retry Guild")
+        # Setup roles on retry_guild
+        r_everyone = Role(id=88882, name="@everyone", position=0, guild=retry_guild)
+        retry_guild.roles.append(r_everyone)
+        r_mod = Role(id=103, name="Moderator", position=3, guild=retry_guild)
+        r_mod.permissions = Permissions((1 << 2) | (1 << 1) | (1 << 4), ban_members=True, kick_members=True)
+        retry_guild.roles.append(r_mod)
+        r_bot = Role(id=104, name="Sentinel", position=4, guild=retry_guild)
+        r_bot.permissions = Permissions(administrator=True, manage_roles=True)
+        retry_guild.roles.append(r_bot)
+        retry_bot_member = Member(id=999, name="SentinelBot", guild=retry_guild)
+        retry_bot_member.roles = [r_bot]
+        retry_bot_member.top_role = r_bot
+        retry_bot_member.guild_permissions = Permissions(administrator=True)
+        retry_guild.me = retry_bot_member
+
+        policy = SecurityResponsePolicy(guild_id="88882", shadow_mode=False, auto_lockdown_enabled=True)
+        incident = Incident(guild_id="88882", title="Incident for retry")
         assessment = AssessmentResult(signal_id="sig_retry", threat_score=85.0, should_trigger_immediate_response=True, is_shadow_mode=False)
 
-        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        record = asyncio.run(self.manager.execute_emergency_lockdown(retry_guild, incident, assessment, policy))
 
         # Simulate failure on role 103 during first recovery attempt
-        original_edit = self.role_mod.edit
+        original_edit = r_mod.edit
         async def failing_edit(*args, **kwargs):
             raise discord.HTTPException(message="Discord 500 Internal Server Error")
 
-        self.role_mod.edit = failing_edit
+        r_mod.edit = failing_edit
 
         # First restore attempt fails on role 103
         attempt1 = asyncio.run(
-            self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="777", policy=policy)
+            self.manager.restore_lockdown(retry_guild, record.lockdown_id, admin_user_id="777", policy=policy)
         )
         mod_entry = next((e for e in attempt1.entries if e.target_id == "103"), None)
         self.assertEqual(mod_entry.status, JournalEntryStatus.FAILED_RESTORE)
 
         # Discord recovers, restore method restored
-        self.role_mod.edit = original_edit
+        r_mod.edit = original_edit
 
         # Second recovery retry resumes and restores successfully
         attempt2 = asyncio.run(
-            self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="777", policy=policy)
+            self.manager.restore_lockdown(retry_guild, record.lockdown_id, admin_user_id="777", policy=policy)
         )
         updated_mod_entry = next((e for e in attempt2.entries if e.target_id == "103"), None)
         self.assertEqual(updated_mod_entry.status, JournalEntryStatus.RESTORED)

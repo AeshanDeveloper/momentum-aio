@@ -44,8 +44,9 @@ class IncidentStatus:
     CONFIRMED = "confirmed"
     DISMISSED = "dismissed"
     INCONCLUSIVE = "inconclusive"
+    RESOLVED = "resolved"
 
-    ALL = {ACTIVE, CONTAINED, UNDER_REVIEW, CONFIRMED, DISMISSED, INCONCLUSIVE}
+    ALL = {ACTIVE, CONTAINED, UNDER_REVIEW, CONFIRMED, DISMISSED, INCONCLUSIVE, RESOLVED}
 
 
 class ProtectiveActionType:
@@ -69,12 +70,14 @@ class ProtectiveActionType:
 
 class ActionExecutionStatus:
     """Execution status for protective containment actions."""
+    REQUESTED = "requested"
     ATTEMPTED = "attempted"
     EXECUTED = "executed"
+    VERIFIED = "verified"
     FAILED = "failed"
     SIMULATED_SHADOW_MODE = "simulated_shadow_mode"
 
-    ALL = {ATTEMPTED, EXECUTED, FAILED, SIMULATED_SHADOW_MODE}
+    ALL = {REQUESTED, ATTEMPTED, EXECUTED, VERIFIED, FAILED, SIMULATED_SHADOW_MODE}
 
 
 class ReviewDecisionType:
@@ -86,6 +89,9 @@ class ReviewDecisionType:
     VOTE_APPROVE = "vote_approve"
     VOTE_REJECT = "vote_reject"
     COMMENT = "comment"
+    REQUEST_INFO = "request_info"
+    VOTE_CORRECTION = "vote_correction"
+    QUORUM_REVOKED = "quorum_revoked"
 
     ALL = {
         CONFIRM,
@@ -95,6 +101,9 @@ class ReviewDecisionType:
         VOTE_APPROVE,
         VOTE_REJECT,
         COMMENT,
+        REQUEST_INFO,
+        VOTE_CORRECTION,
+        QUORUM_REVOKED,
     }
 
 
@@ -325,18 +334,44 @@ class AdminVote:
     vote_id: str = field(default_factory=lambda: f"vote_{uuid.uuid4().hex[:12]}")
     admin_id: str = ""
     admin_name: Optional[str] = None
+    choice: str = "confirm"
+    previous_choice: Optional[str] = None
     approved: bool = True
     reason: Optional[str] = None
     voted_at: float = field(default_factory=time.time)
+    corrected_at: Optional[float] = None
+    correction_history: List[Dict[str, Any]] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def correct(self, new_choice: str, reason: Optional[str] = None) -> None:
+        """Records a vote correction with audit history."""
+        now = time.time()
+        self.correction_history.append({
+            "old_choice": self.choice,
+            "new_choice": new_choice,
+            "timestamp": now,
+            "reason": reason,
+        })
+        self.previous_choice = self.choice
+        self.choice = new_choice
+        self.corrected_at = now
+        self.approved = (new_choice != "dismiss")
+        if reason:
+            self.reason = reason
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "vote_id": self.vote_id,
             "admin_id": self.admin_id,
             "admin_name": self.admin_name,
+            "choice": self.choice,
+            "previous_choice": self.previous_choice,
             "approved": self.approved,
             "reason": self.reason,
             "voted_at": self.voted_at,
+            "corrected_at": self.corrected_at,
+            "correction_history": list(self.correction_history),
+            "metadata": dict(self.metadata),
         }
 
     @classmethod
@@ -345,9 +380,14 @@ class AdminVote:
             vote_id=data.get("vote_id", f"vote_{uuid.uuid4().hex[:12]}"),
             admin_id=str(data.get("admin_id", "")),
             admin_name=data.get("admin_name"),
+            choice=str(data.get("choice", "confirm")),
+            previous_choice=data.get("previous_choice"),
             approved=bool(data.get("approved", True)),
             reason=data.get("reason"),
             voted_at=float(data.get("voted_at", time.time())),
+            corrected_at=data.get("corrected_at"),
+            correction_history=list(data.get("correction_history", [])),
+            metadata=dict(data.get("metadata", {})),
         )
 
 
@@ -458,6 +498,20 @@ class Incident:
             self.severity = ThreatSeverity.MEDIUM
         if self.confidence not in ThreatConfidence.ALL:
             self.confidence = ThreatConfidence.SUSPICIOUS
+
+    @property
+    def trigger_rule_id(self) -> str:
+        """Returns the primary trigger rule or matched pattern ID."""
+        if self.matched_patterns:
+            return self.matched_patterns[0]
+        if self.trigger_reasons:
+            return self.trigger_reasons[0]
+        return str(self.metadata.get("trigger_rule_id", "security_burst"))
+
+    @property
+    def event_count(self) -> int:
+        """Returns total correlated events or evidence count."""
+        return len(self.signal_ids) or len(self.evidence_references) or 1
 
     def add_signal(self, signal: ThreatSignal) -> None:
         """Merges a correlated ThreatSignal into this active incident."""
@@ -636,6 +690,16 @@ class Incident:
 
 
 
+    def mark_dismissed(self, admin_id: str, admin_name: Optional[str] = None, reason: str = "") -> None:
+        """Marks incident as dismissed (e.g. false alarm) while strictly preserving all forensic evidence."""
+        self.status = IncidentStatus.DISMISSED
+        self.add_decision(
+            actor_id=str(admin_id),
+            actor_name=admin_name,
+            decision_type=ReviewDecisionType.DISMISS,
+            reason=reason or f"Dismissed by {admin_name or admin_id}",
+        )
+
     def transition_status(self, new_status: str, actor_id: str, reason: str) -> None:
         """Safely updates incident status while preserving full audit history."""
         if new_status not in IncidentStatus.ALL:
@@ -669,12 +733,11 @@ class Incident:
             "first_seen_at": self.first_seen_at,
             "latest_seen_at": self.latest_seen_at,
             "observed_facts": self.observed_facts,
-            "inferred_intent": self.inferred_intent,
-            "evidence_references": [e.to_dict() for e in self.evidence_references],
-            "protective_actions": [a.to_dict() for a in self.protective_actions],
+            "evidence_references": [e.to_dict() if hasattr(e, "to_dict") else e for e in self.evidence_references],
+            "protective_actions": [a.to_dict() if hasattr(a, "to_dict") else a for a in self.protective_actions],
             "snapshot_ids": self.snapshot_ids,
-            "decision_history": [d.to_dict() for d in self.decision_history],
-            "votes": {k: v.to_dict() for k, v in self.votes.items()},
+            "decision_history": [d.to_dict() if hasattr(d, "to_dict") else d for d in self.decision_history],
+            "votes": {k: (v.to_dict() if hasattr(v, "to_dict") else v) for k, v in self.votes.items()},
             "recovery_code": self.recovery_code,
             "recovery_instructions": self.recovery_instructions,
             "metadata": self.metadata,

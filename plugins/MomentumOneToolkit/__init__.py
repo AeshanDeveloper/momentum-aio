@@ -22,6 +22,7 @@ from .commands.security import (
     punishment,
     thresholds,
     extraowner,
+    lockdown,
 )
 from .commands.tickets import ticket
 from .commands.dev import (
@@ -77,6 +78,7 @@ class Plugin(BasePlugin):
             punishment,
             thresholds,
             extraowner,
+            lockdown,
             ticket,
             blacklist,
             unblacklist,

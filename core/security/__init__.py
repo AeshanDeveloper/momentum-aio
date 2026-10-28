@@ -81,6 +81,11 @@ from .protection_service import (
     SecurityProtectionService,
     security_protection_service,
 )
+from .consensus_manager import (
+    ReviewChoice,
+    IncidentConsensusManager,
+    incident_consensus_manager,
+)
 
 __all__ = [
     "CooldownManager",
@@ -145,6 +150,9 @@ __all__ = [
     "admin_notifier",
     "SecurityProtectionService",
     "security_protection_service",
+    "ReviewChoice",
+    "IncidentConsensusManager",
+    "incident_consensus_manager",
 ]
 
 

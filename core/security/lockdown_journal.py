@@ -36,6 +36,7 @@ from core.security.response_policy import LockdownStatus
 class JournalEntryStatus:
     """State of an individual role or channel permission modification."""
     APPLIED = "applied"
+    VERIFIED = "verified"
     SKIPPED_HIERARCHY = "skipped_hierarchy"
     SKIPPED_PRESERVED = "skipped_preserved"
     FAILED_API = "failed_api"
@@ -45,6 +46,7 @@ class JournalEntryStatus:
 
     ALL = {
         APPLIED,
+        VERIFIED,
         SKIPPED_HIERARCHY,
         SKIPPED_PRESERVED,
         FAILED_API,
@@ -169,6 +171,7 @@ class LockdownRecord:
         self.summary = {
             "total_entries": len(self.entries),
             "applied": counts.get(JournalEntryStatus.APPLIED, 0),
+            "verified": counts.get(JournalEntryStatus.VERIFIED, 0),
             "skipped_hierarchy": counts.get(JournalEntryStatus.SKIPPED_HIERARCHY, 0),
             "skipped_preserved": counts.get(JournalEntryStatus.SKIPPED_PRESERVED, 0),
             "failed_api": counts.get(JournalEntryStatus.FAILED_API, 0),

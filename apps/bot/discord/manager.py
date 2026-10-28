@@ -1,7 +1,7 @@
 import os
 import time
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import discord
 from config.settings import settings
 from core.logging.logger import logger
@@ -579,6 +579,36 @@ class BotManager:
                 for e in events_registry.list_all()
             ]
         }
+
+    def get_guild(self, guild_id: Union[int, str]) -> Optional[discord.Guild]:
+        """Delegates guild lookup to discord client."""
+        try:
+            return self.client.get_guild(int(guild_id))
+        except (ValueError, TypeError):
+            return None
+
+    def get_channel(self, channel_id: Union[int, str]) -> Optional[Any]:
+        """Delegates channel lookup to discord client."""
+        try:
+            return self.client.get_channel(int(channel_id))
+        except (ValueError, TypeError):
+            return None
+
+    def get_user(self, user_id: Union[int, str]) -> Optional[Any]:
+        """Delegates user lookup to discord client."""
+        try:
+            return self.client.get_user(int(user_id))
+        except (ValueError, TypeError):
+            return None
+
+    async def fetch_user(self, user_id: Union[int, str]) -> Optional[Any]:
+        """Delegates fetch_user to discord client."""
+        try:
+            if hasattr(self.client, "fetch_user"):
+                return await self.client.fetch_user(int(user_id))
+        except Exception:
+            pass
+        return None
 
     async def logout(self) -> None:
         self._is_starting = False

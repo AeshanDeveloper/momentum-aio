@@ -1580,5 +1580,65 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     await interaction.response.edit_message(view=view)
             return
 
+        # ----------------------------------------------------------------------
+        # 13. Sentinel Emergency Interactive Controls (sentinel:action:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("sentinel:action:"):
+            from core.security.admin_notifier import EmergencyRecoveryView
+            from core.security.incident_manager import incident_manager
+            from core.security.lockdown_journal import lockdown_journal_manager
+            from core.security.protection_service import security_protection_service
+
+            parts = custom_id.split(":")
+            act_name = parts[2] if len(parts) > 2 else ""
+            inc_id = parts[3] if len(parts) > 3 else ""
+
+            incident = incident_manager.get_incident(inc_id)
+            if not incident:
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.send_message(content=f"❌ Incident `{inc_id}` could not be located in cache.", ephemeral=True)
+                return
+
+            pol = security_protection_service.get_policy(incident.guild_id)
+            lockdown_rec = lockdown_journal_manager.get_active_lockdown_for_guild(incident.guild_id)
+            view = EmergencyRecoveryView(incident=incident, lockdown_record=lockdown_rec, policy=pol)
+
+            if act_name == "keep_lockdown":
+                await view.handle_keep_lockdown(interaction)
+            elif act_name == "begin_recovery":
+                await view.handle_begin_recovery(interaction)
+            elif act_name == "review_incident":
+                await view.handle_review_incident(interaction)
+            elif act_name == "report_false_alarm":
+                await view.handle_false_alarm(interaction)
+            return
+
+        # ----------------------------------------------------------------------
+        # 14. Sentinel Multi-Admin Consensus Review Controls (sentinel:review:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("sentinel:review:"):
+            from core.security.consensus_manager import (
+                incident_consensus_manager,
+                IncidentReviewView,
+                ReviewChoice,
+            )
+            from core.security.incident_manager import incident_manager
+
+            parts = custom_id.split(":")
+            choice = parts[2] if len(parts) > 2 else ""
+            inc_id = parts[3] if len(parts) > 3 else ""
+
+            incident = incident_manager.get_incident(inc_id)
+            if not incident:
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        content=f"❌ Incident `{inc_id}` could not be located in cache.", ephemeral=True
+                    )
+                return
+
+            view = IncidentReviewView(incident=incident)
+            await view._handle_vote_interaction(interaction, choice)
+            return
+
     except Exception as err:
         logger.error(f"[ComponentHandler] Component execution error: {err}", exc_info=True)

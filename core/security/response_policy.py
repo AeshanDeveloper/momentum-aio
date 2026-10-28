@@ -46,11 +46,12 @@ class LockdownStatus:
     ATTEMPTED = "attempted"
     ACTIVE = "active"
     PARTIAL = "partial"                  # Applied with limitations (e.g. role hierarchy or missing bot perms)
+    VERIFIED = "verified"                # Successfully applied and cryptographically/permission verified
     RESTORED = "restored"
     OVERRIDDEN_BY_ADMIN = "overridden_by_admin"
     FAILED = "failed"
 
-    ALL = {REQUESTED, ATTEMPTED, ACTIVE, PARTIAL, RESTORED, OVERRIDDEN_BY_ADMIN, FAILED}
+    ALL = {REQUESTED, ATTEMPTED, ACTIVE, PARTIAL, VERIFIED, RESTORED, OVERRIDDEN_BY_ADMIN, FAILED}
 
 
 # Standard dangerous permission names in Discord
@@ -107,6 +108,13 @@ class SecurityResponsePolicy:
     recovery_quorum: int = 2                     # Required approvals if non-owner initiates recovery
     fallback_channel_id: Optional[str] = None   # Secure fallback channel if recovery admin DMs are closed
     
+    # Consensus & Review Quorums (Agent 6)
+    dismissal_quorum: int = 3                    # Number of distinct trusted admins to dismiss false alarm
+    confirmation_quorum: int = 2                 # Number of votes to confirm threat
+    prevent_subject_voting: bool = True          # Strictly block incident subject/accused actor from voting
+    allow_vote_correction: bool = True           # Allow reviewer to change/correct their vote
+    trusted_recovery_admins: Optional[List[str]] = None  # Alias for trusted_recovery_admin_ids
+    
     # Scoping & Preservation
     target_role_ids: List[str] = field(default_factory=list)              # Specific roles to strip (empty = default dangerous roles)
     preserved_recovery_role_ids: List[str] = field(default_factory=list)  # NEVER strip permissions from these roles
@@ -117,6 +125,10 @@ class SecurityResponsePolicy:
     dangerous_permissions: List[str] = field(default_factory=lambda: list(DEFAULT_DANGEROUS_PERMISSIONS))
     channel_deny_permissions: List[str] = field(default_factory=lambda: list(DEFAULT_CHANNEL_DENY_PERMISSIONS))
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.trusted_recovery_admins is not None and not self.trusted_recovery_admin_ids:
+            self.trusted_recovery_admin_ids = [str(x) for x in self.trusted_recovery_admins]
 
     def is_trusted_recovery_actor(self, user_id: Union[int, str]) -> bool:
         """Verifies if a user ID belongs to the recovery owner or trusted recovery admin team."""
@@ -180,6 +192,10 @@ class SecurityResponsePolicy:
             "recovery_owner_id": str(self.recovery_owner_id) if self.recovery_owner_id else None,
             "trusted_recovery_admin_ids": [str(x) for x in self.trusted_recovery_admin_ids],
             "recovery_quorum": self.recovery_quorum,
+            "dismissal_quorum": self.dismissal_quorum,
+            "confirmation_quorum": self.confirmation_quorum,
+            "prevent_subject_voting": self.prevent_subject_voting,
+            "allow_vote_correction": self.allow_vote_correction,
             "fallback_channel_id": str(self.fallback_channel_id) if self.fallback_channel_id else None,
             "target_role_ids": [str(x) for x in self.target_role_ids],
             "preserved_recovery_role_ids": [str(x) for x in self.preserved_recovery_role_ids],
@@ -209,6 +225,10 @@ class SecurityResponsePolicy:
             recovery_owner_id=data.get("recovery_owner_id"),
             trusted_recovery_admin_ids=[str(x) for x in data.get("trusted_recovery_admin_ids", [])],
             recovery_quorum=int(data.get("recovery_quorum", 2)),
+            dismissal_quorum=int(data.get("dismissal_quorum", 3)),
+            confirmation_quorum=int(data.get("confirmation_quorum", 2)),
+            prevent_subject_voting=bool(data.get("prevent_subject_voting", True)),
+            allow_vote_correction=bool(data.get("allow_vote_correction", True)),
             fallback_channel_id=data.get("fallback_channel_id"),
             target_role_ids=[str(x) for x in data.get("target_role_ids", [])],
             preserved_recovery_role_ids=[str(x) for x in data.get("preserved_recovery_role_ids", [])],

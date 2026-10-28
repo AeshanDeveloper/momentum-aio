@@ -172,10 +172,17 @@ class SecurityProtectionService:
         gid = str(incident.guild_id)
         policy = self.get_policy(gid)
 
-        # Obtain guild instance from bot client if available
+        # Obtain guild instance and client
+        client = getattr(self.bot_client, "client", self.bot_client)
         guild = None
-        if self.bot_client and hasattr(self.bot_client, "get_guild"):
-            guild = self.bot_client.get_guild(int(gid))
+        try:
+            target_gid = int(gid)
+            if client and hasattr(client, "get_guild"):
+                guild = client.get_guild(target_gid)
+            elif self.bot_client and hasattr(self.bot_client, "get_guild"):
+                guild = self.bot_client.get_guild(target_gid)
+        except (ValueError, TypeError):
+            pass
 
         # 1. Execute Emergency Containment
         lockdown_record = await self.lockdown_manager.execute_emergency_lockdown(
@@ -188,7 +195,7 @@ class SecurityProtectionService:
         # 2. Dispatch Interactive Alerts to Trusted Admins
         if policy.response_level in (ResponseLevel.ALERT, ResponseLevel.LOCKDOWN):
             await self.notifier.dispatch_emergency_alert(
-                bot_client=self.bot_client,
+                bot_client=client or self.bot_client,
                 guild=guild,
                 incident=incident,
                 lockdown_record=lockdown_record,
