@@ -278,6 +278,10 @@ class SecurityEventCollector:
         except Exception as err:
             logger.warn(f"[EventCollector] Failed to persist security event {event.event_id} to database: {err}")
 
+    def dispatch(self, event: SecurityEvent) -> None:
+        """Dispatches an enriched SecurityEvent to all matching subscribers."""
+        self._dispatch_event(event)
+
     def _dispatch_event(self, event: SecurityEvent) -> None:
         """Dispatches an enriched SecurityEvent to all matching subscribers."""
         event.status = SecurityEventStatus.DISPATCHED

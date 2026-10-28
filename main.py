@@ -59,7 +59,9 @@ async def main():
         await BlacklistManager.initialize()
         await NoPrefixManager.initialize()
         await AntiNukeManager.initialize()
-        logger.info("[MomentumOne] Security registries (ServerCommands, Blacklist, NoPrefix, AntiNuke) hydrated from storage.")
+        from core.security.activity_manager import security_activity_manager
+        security_activity_manager.attach_to_collector()
+        logger.info("[MomentumOne] Security registries (ServerCommands, Blacklist, NoPrefix, AntiNuke) hydrated from storage; ActivityManager attached.")
     except Exception as err:
         logger.error(f"[Startup] Database initialization or hydration failed: {err}")
 

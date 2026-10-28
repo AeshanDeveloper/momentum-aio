@@ -11,6 +11,16 @@ from .security_event import (
 )
 from .event_normalizer import SecurityEventNormalizer
 from .event_collector import SecurityEventCollector, security_event_collector
+from .activity_manager import (
+    SecurityActivityManager,
+    security_activity_manager,
+    ActivityCategory,
+    EmergencySignalType,
+    EmergencySignal,
+    ThresholdConfig,
+    ActivityWindowSummary,
+    ActivityItem,
+)
 
 __all__ = [
     "CooldownManager",
@@ -25,4 +35,13 @@ __all__ = [
     "SecurityEventNormalizer",
     "SecurityEventCollector",
     "security_event_collector",
+    "SecurityActivityManager",
+    "security_activity_manager",
+    "ActivityCategory",
+    "EmergencySignalType",
+    "EmergencySignal",
+    "ThresholdConfig",
+    "ActivityWindowSummary",
+    "ActivityItem",
 ]
+
