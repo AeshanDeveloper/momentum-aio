@@ -80,6 +80,23 @@ class JournalEntry:
     created_at: float = field(default_factory=time.time)
     restored_at: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    entity_id: Optional[str] = None
+    entity_type: Optional[str] = None
+    entity_name: Optional[str] = None
+
+    def __post_init__(self):
+        if self.entity_id and not self.target_id:
+            self.target_id = str(self.entity_id)
+        elif self.target_id and not self.entity_id:
+            self.entity_id = str(self.target_id)
+        if self.entity_type and not self.target_type:
+            self.target_type = str(self.entity_type)
+        elif self.target_type and not self.entity_type:
+            self.entity_type = str(self.target_type)
+        if self.entity_name and not self.target_name:
+            self.target_name = str(self.entity_name)
+        elif self.target_name and not self.entity_name:
+            self.entity_name = str(self.target_name)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

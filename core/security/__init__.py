@@ -86,6 +86,16 @@ from .consensus_manager import (
     IncidentConsensusManager,
     incident_consensus_manager,
 )
+from .communication_service import (
+    ClarificationChoice,
+    ClarificationConversationView,
+    SecurityCommunicationService,
+    security_communication_service,
+)
+from .pipeline import (
+    SentinelSecurityPipeline,
+    sentinel_pipeline,
+)
 
 __all__ = [
     "CooldownManager",
@@ -153,7 +163,14 @@ __all__ = [
     "ReviewChoice",
     "IncidentConsensusManager",
     "incident_consensus_manager",
+    "ClarificationChoice",
+    "ClarificationConversationView",
+    "SecurityCommunicationService",
+    "security_communication_service",
+    "SentinelSecurityPipeline",
+    "sentinel_pipeline",
 ]
+
 
 
 

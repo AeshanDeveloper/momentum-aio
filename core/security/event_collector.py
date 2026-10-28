@@ -327,6 +327,10 @@ class SecurityEventCollector:
         filtered.sort(key=lambda e: e.timestamp, reverse=True)
         return filtered[:limit]
 
+    def get_recent_events_for_guild(self, guild_id: str) -> List[SecurityEvent]:
+        """Returns recent events recorded for a specific guild."""
+        return list(self._events_by_guild.get(str(guild_id), []))
+
     def get_event_by_id(self, event_id: str) -> Optional[SecurityEvent]:
         """Retrieves a security event by its unique event ID."""
         return self._events_by_id.get(str(event_id))

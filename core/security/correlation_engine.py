@@ -511,6 +511,10 @@ class SecurityCorrelationEngine:
         """Sets a per-guild custom configuration override for a pattern."""
         self._guild_rule_overrides[str(guild_id)][pattern_id] = config
 
+    def list_rules(self) -> List[CorrelationRuleConfig]:
+        """Returns list of all active correlation rule configurations."""
+        return list(self._rule_configs.values())
+
     def reset_guild_rules(self, guild_id: str) -> None:
         """Clears all custom rule overrides for a guild, reverting to global defaults."""
         self._guild_rule_overrides.pop(str(guild_id), None)

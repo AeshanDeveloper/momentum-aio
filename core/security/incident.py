@@ -124,6 +124,10 @@ class EvidenceReference:
     summary: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def source_type(self) -> str:
+        return self.metadata.get("source_type", self.event_type)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "evidence_id": self.evidence_id,
@@ -485,10 +489,11 @@ class Incident:
     decision_history: List[DecisionRecord] = field(default_factory=list)
     votes: Dict[str, AdminVote] = field(default_factory=dict)
 
-    # Emergency Recovery
     recovery_code: Optional[str] = None
     recovery_instructions: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    actor_id: Optional[str] = None
+    is_whitelisted_actor: Optional[bool] = None
 
     def __post_init__(self):
         self.guild_id = str(self.guild_id)
@@ -498,6 +503,18 @@ class Incident:
             self.severity = ThreatSeverity.MEDIUM
         if self.confidence not in ThreatConfidence.ALL:
             self.confidence = ThreatConfidence.SUSPICIOUS
+        if self.actor_id and not any(a.get("actor_id") == str(self.actor_id) for a in self.relevant_actors):
+            self.relevant_actors.append({
+                "actor_id": str(self.actor_id),
+                "is_whitelisted": bool(self.is_whitelisted_actor),
+                "attribution_confidence": self.attribution_confidence,
+            })
+        if self.is_whitelisted_actor:
+            self.is_whitelisted_actor_involved = True
+        elif not self.actor_id and self.relevant_actors:
+            self.actor_id = self.relevant_actors[0].get("actor_id")
+        if self.is_whitelisted_actor is None:
+            self.is_whitelisted_actor = self.is_whitelisted_actor_involved
 
     @property
     def trigger_rule_id(self) -> str:
@@ -669,7 +686,7 @@ class Incident:
 
     def record_evidence(
         self,
-        event_id: str,
+        event_id: Optional[str] = None,
         event_type: str = "",
         summary: str = "",
         actor_id: Optional[str] = None,
@@ -677,13 +694,21 @@ class Incident:
         **kwargs: Any,
     ) -> EvidenceReference:
         """Explicitly records an evidence reference to normalized security evidence."""
+        eid = event_id or kwargs.pop("evidence_id", None) or f"ev_{uuid.uuid4().hex[:10]}"
+        etype = event_type or kwargs.pop("source_type", "evidence")
+        details = kwargs.pop("details", {})
+        metadata = dict(kwargs)
+        if details:
+            metadata.update(details)
+        if "source_type" not in metadata:
+            metadata["source_type"] = etype
         ev = EvidenceReference(
-            event_id=event_id,
-            event_type=event_type,
-            summary=summary,
-            actor_id=actor_id,
+            event_id=eid,
+            event_type=etype,
+            summary=summary or details.get("choice_label", ""),
+            actor_id=actor_id or details.get("respondent_id"),
             target_id=target_id,
-            metadata=kwargs,
+            metadata=metadata,
         )
         self.evidence_references.append(ev)
         return ev

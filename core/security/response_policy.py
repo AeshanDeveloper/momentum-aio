@@ -125,10 +125,32 @@ class SecurityResponsePolicy:
     dangerous_permissions: List[str] = field(default_factory=lambda: list(DEFAULT_DANGEROUS_PERMISSIONS))
     channel_deny_permissions: List[str] = field(default_factory=lambda: list(DEFAULT_CHANNEL_DENY_PERMISSIONS))
     metadata: Dict[str, Any] = field(default_factory=dict)
+    isolate_whitelisted_compromise: bool = True
+    recovery_channel_id: Optional[str] = None
 
     def __post_init__(self):
         if self.trusted_recovery_admins is not None and not self.trusted_recovery_admin_ids:
             self.trusted_recovery_admin_ids = [str(x) for x in self.trusted_recovery_admins]
+        if self.recovery_channel_id is None and self.fallback_channel_id:
+            self.recovery_channel_id = str(self.fallback_channel_id)
+        elif self.fallback_channel_id is None and self.recovery_channel_id:
+            self.fallback_channel_id = str(self.recovery_channel_id)
+
+    @property
+    def emergency_threshold_score(self) -> float:
+        return self.emergency_score_threshold
+
+    @emergency_threshold_score.setter
+    def emergency_threshold_score(self, value: float) -> None:
+        self.emergency_score_threshold = value
+
+    @property
+    def recovery_admin_ids(self) -> List[str]:
+        return self.trusted_recovery_admin_ids
+
+    @recovery_admin_ids.setter
+    def recovery_admin_ids(self, value: List[str]) -> None:
+        self.trusted_recovery_admin_ids = value
 
     def is_trusted_recovery_actor(self, user_id: Union[int, str]) -> bool:
         """Verifies if a user ID belongs to the recovery owner or trusted recovery admin team."""

@@ -91,12 +91,12 @@ class IncidentManager:
         self._incident_subscribers: List[Any] = []
         self._is_attached_to_correlation: bool = False
 
-    def attach_to_correlation_engine(self) -> None:
+    def attach_to_correlation_engine(self, engine: Optional[Any] = None) -> None:
         """Subscribes the incident manager to the security correlation engine stream."""
-        if not self._is_attached_to_correlation:
-            security_correlation_engine.subscribe_signals(self.on_threat_signal)
-            self._is_attached_to_correlation = True
-            logger.info("[IncidentManager] Subscribed to SecurityCorrelationEngine threat stream")
+        target_engine = engine or security_correlation_engine
+        target_engine.subscribe_signals(self.on_threat_signal)
+        self._is_attached_to_correlation = True
+        logger.info("[IncidentManager] Subscribed to SecurityCorrelationEngine threat stream")
 
     def subscribe_incidents(self, subscriber: Any) -> None:
         """Registers a listener for incident lifecycle updates."""

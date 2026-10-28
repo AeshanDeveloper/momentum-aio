@@ -1640,5 +1640,26 @@ async def execute(ctx: Any, interaction: discord.Interaction):
             await view._handle_vote_interaction(interaction, choice)
             return
 
+        # ----------------------------------------------------------------------
+        # 15. Sentinel Structured Clarification Controls (sentinel:clarify:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("sentinel:clarify:"):
+            from core.security.communication_service import security_communication_service
+
+            parts = custom_id.split(":")
+            # Format: sentinel:clarify:{choice}:{incident_id}:{recipient_id}
+            choice = parts[2] if len(parts) > 2 else ""
+            inc_id = parts[3] if len(parts) > 3 else ""
+            rec_id = parts[4] if len(parts) > 4 else ""
+
+            await security_communication_service.handle_clarification_response(
+                interaction=interaction,
+                choice=choice,
+                incident_id=inc_id,
+                recipient_id=rec_id,
+            )
+            return
+
     except Exception as err:
         logger.error(f"[ComponentHandler] Component execution error: {err}", exc_info=True)
+

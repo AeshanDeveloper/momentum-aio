@@ -369,7 +369,12 @@ class BotManager:
             # Sync and hydrate client guilds before startup diagnostics
             await self._sync_guilds()
 
+            # Initialize Sentinel Security Unified Pipeline Core
+            from core.security.pipeline import sentinel_pipeline
+            sentinel_pipeline.initialize(self.client)
+
             # Startup Diagnostics
+
             reg_events = events_registry.list_all()
             reg_cmds = commands_registry.list_all()
             from core.security.antinuke import AntiNukeConstants
