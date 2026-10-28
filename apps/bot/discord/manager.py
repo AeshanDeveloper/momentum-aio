@@ -82,6 +82,12 @@ class BotManager:
 
         @self.client.event
         async def on_message(message: discord.Message):
+            # Cache message mentions for ghost ping detection
+            try:
+                from core.logging.sentinel_event_logger import SentinelEventLogger
+                await SentinelEventLogger.handle_message_create(message)
+            except Exception:
+                pass
             # Dispatch to registered messageCreate event handlers
             handlers = events_registry.get("messageCreate")
             for h in handlers:
@@ -89,6 +95,7 @@ class BotManager:
                     await h.execute(self.plugin_context, message)
                 except Exception as err:
                     logger.error(f"[BotManager] Error executing message handler {h.name}: {err}")
+
 
         @self.client.event
         async def on_interaction(interaction: discord.Interaction):
@@ -322,10 +329,22 @@ class BotManager:
 
         @self.client.event
         async def on_guild_remove(guild: discord.Guild):
-            from plugins.MomentumOneToolkit.events.guild_join import handle_guild_remove
-            handle_guild_remove(guild)
             await _dispatch_plugin_events("on_guild_remove", guild)
             await _dispatch_plugin_events("guild_remove", guild)
+
+        @self.client.event
+        async def on_message_delete(message: discord.Message):
+            await _dispatch_plugin_events("on_message_delete", message)
+
+        @self.client.event
+        async def on_message_edit(before: discord.Message, after: discord.Message):
+            await _dispatch_plugin_events("on_message_edit", before, after)
+
+        @self.client.event
+        async def on_bulk_message_delete(messages: list, channel: Any = None):
+            ch = channel or (messages[0].channel if messages else None)
+            await _dispatch_plugin_events("on_bulk_message_delete", messages, ch)
+
 
     async def setup(self) -> Dict[str, bool]:
         if self._is_setup:

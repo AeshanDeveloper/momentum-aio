@@ -34,6 +34,31 @@ class ChannelType(enum.Enum):
     stage_voice = 13
     forum = 15
 
+class VerificationLevel(enum.Enum):
+    none = 0
+    low = 1
+    medium = 2
+    high = 3
+    highest = 4
+
+class MFALevel(enum.Enum):
+    disabled = 0
+    require_2fa = 1
+
+class NotificationLevel(enum.Enum):
+    all_messages = 0
+    only_mentions = 1
+
+class ContentFilter(enum.Enum):
+    disabled = 0
+    no_role = 1
+    all_members = 2
+
+ExplicitContentFilter = ContentFilter
+ExplicitContentFilterLevel = ContentFilter
+
+
+
 class InteractionType(enum.Enum):
     ping = 1
     application_command = 2

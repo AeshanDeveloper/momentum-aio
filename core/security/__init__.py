@@ -3,6 +3,14 @@ from .blacklist import BlacklistManager
 from .noprefix import NoPrefixManager
 from .antispam import AntiSpamService
 from .server_commands import ServerCommandManager
+from .security_event import (
+    SecurityEvent,
+    SecurityEventType,
+    AttributionConfidence,
+    SecurityEventStatus,
+)
+from .event_normalizer import SecurityEventNormalizer
+from .event_collector import SecurityEventCollector, security_event_collector
 
 __all__ = [
     "CooldownManager",
@@ -10,4 +18,11 @@ __all__ = [
     "NoPrefixManager",
     "AntiSpamService",
     "ServerCommandManager",
+    "SecurityEvent",
+    "SecurityEventType",
+    "AttributionConfidence",
+    "SecurityEventStatus",
+    "SecurityEventNormalizer",
+    "SecurityEventCollector",
+    "security_event_collector",
 ]

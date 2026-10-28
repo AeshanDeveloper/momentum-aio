@@ -136,8 +136,9 @@ class Plugin(BasePlugin):
             )
             events_registry.register(evt)
 
-        # Register dedicated logging event listeners
-        for log_ev in ALL_LOGGING_EVENT_MODULES:
+        # Register dedicated logging event listeners (including ghost ping & message events)
+        from .events.logging import FULL_LOGGING_EVENT_MODULES
+        for log_ev in FULL_LOGGING_EVENT_MODULES:
             evt = Event(
                 name=getattr(log_ev, "name"),
                 execute=getattr(log_ev, "execute"),

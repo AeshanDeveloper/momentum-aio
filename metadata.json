@@ -1,0 +1,8 @@
+{
+  "name": "Sentinel™ - Discord Security Bot",
+  "description": "Enterprise-grade Discord server security and anti-nuke bot with real-time event observation, threat detection, and automated recovery.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

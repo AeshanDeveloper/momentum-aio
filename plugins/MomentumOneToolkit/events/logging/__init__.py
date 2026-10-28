@@ -15,6 +15,9 @@ from . import (
     invite_delete,
     emojis_update,
     webhooks_update,
+    message_delete,
+    message_edit,
+    message_bulk_delete,
 )
 
 ALL_LOGGING_EVENT_MODULES = [
@@ -35,3 +38,11 @@ ALL_LOGGING_EVENT_MODULES = [
     emojis_update,
     webhooks_update,
 ]
+
+EXTENDED_LOGGING_EVENT_MODULES = [
+    message_delete,
+    message_edit,
+    message_bulk_delete,
+]
+
+FULL_LOGGING_EVENT_MODULES = ALL_LOGGING_EVENT_MODULES + EXTENDED_LOGGING_EVENT_MODULES
