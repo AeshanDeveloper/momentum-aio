@@ -448,9 +448,15 @@ async def _handle_recover(
         return await send_response(message, box)
 
 
-async def _handle_posture(message: Any, guild: Any, policy: SecurityResponsePolicy):
-    """Executes full diagnostic posture audit."""
+def build_posture_view(guild: Any, policy: SecurityResponsePolicy) -> Any:
+    """Builds interactive posture container with real-time audit score and diagnostic breakdown."""
     report = emergency_lockdown_manager.audit_guild_security_posture(guild, policy)
+    gid = str(guild.id if guild else "0")
+
+    score = report.get("score", 100)
+    grade = report.get("grade", "A")
+    overall = report.get("overall_posture", "SECURE")
+    dangerous_roles = report.get("dangerous_roles", [])
 
     findings_text = []
     for item in report.get("checklist", []):
@@ -462,21 +468,113 @@ async def _handle_posture(message: Any, guild: Any, policy: SecurityResponsePoli
         remediation = f"\n  ↳ *Remedy: {item.get('remediation')}*" if item.get("remediation") else ""
         findings_text.append(f"{icon} **{item.get('item')}** [{item.get('status')}]{remediation}")
 
-    summary_desc = (
-        f"**Server Posture:** `{report.get('overall_posture')}`\n\n"
-        + "\n".join(findings_text[:8])
+    action_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"lck:posture_refresh:{gid}")
+            .set_label("Recheck Posture")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("refresh", "🔄"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"lck:posture_dangerous:{gid}")
+            .set_label(f"Dangerous Roles ({len(dangerous_roles)})")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("danger", "⚡"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"sec_wiz:quick_confirm:{gid}")
+            .set_label("Quick Setup")
+            .set_style(ButtonStyle.Success)
+            .set_emoji(EMOJIS.get("zap", "⚡"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"sec:hub:{gid}")
+            .set_label("Security Hub")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("shield", "🛡️"))
+        )
     )
 
-    box = (
+    summary_desc = (
+        f"**Security Score:** `{score} / 100` (Grade `{grade}`)\n"
+        f"**Overall Health:** `{overall}`\n"
+        f"**Monitored Roles:** `{len(dangerous_roles)}` holding dangerous administrative permissions\n\n"
+        + "\n".join(findings_text[:6])
+    )
+
+    color = COLORS.get("success", "#3FD438") if overall == "SECURE" else COLORS.get("warning", "#F59E0B")
+    return (
         ContainerBuilder()
-        .set_accent_color(COLORS.get("success" if report.get("overall_posture") == "SECURE" else "warning", "#0844C5"))
+        .set_accent_color(color)
         .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} Security Posture Diagnostic")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_text_display(summary_desc)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(f"-# {settings.BOT_NAME} Posture Auditor")
+        .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Live State Recheck • Hierarchy & Permission Verifier")
         .build()
     )
+
+
+def build_dangerous_permissions_view(guild: Any, policy: SecurityResponsePolicy) -> Any:
+    """Builds itemized breakdown of all roles possessing dangerous permissions."""
+    report = emergency_lockdown_manager.audit_guild_security_posture(guild, policy)
+    gid = str(guild.id if guild else "0")
+    roles = report.get("dangerous_roles", [])
+
+    lines = []
+    if not roles:
+        lines.append(f"{EMOJIS.get('check', '✅')} **No unmanaged roles possess dangerous administrative permissions.**")
+    else:
+        for r in roles[:8]:
+            manage_icon = "🟢" if r.get("can_manage") else "🔴"
+            perms_str = ", ".join(f"`{p}`" for p in r.get("dangerous_permissions", []))
+            lines.append(
+                f"• {manage_icon} **{r.get('role_name')}** (Pos `{r.get('position')}` • ID `{r.get('role_id')}`)\n"
+                f"  Dangerous: {perms_str}\n"
+                f"  Manageable by Sentinel: `{'Yes' if r.get('can_manage') else 'NO - Above Bot Role'}`\n"
+                f"  *Remedy: {r.get('remediation')}*"
+            )
+
+    action_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"lck:posture_refresh:{gid}")
+            .set_label("Back to Posture")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("arrow_left", "⬅️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"sec:hub:{gid}")
+            .set_label("Security Hub")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("shield", "🛡️"))
+        )
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("warning", "#F59E0B") if any(not r.get("can_manage") for r in roles) else COLORS.get("info", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('danger', '⚡')} Dangerous Role Permissions Breakdown")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display("\n\n".join(lines))
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Role Hierarchy Audit Trail")
+        .build()
+    )
+
+
+async def _handle_posture(message: Any, guild: Any, policy: SecurityResponsePolicy):
+    """Executes full diagnostic posture audit."""
+    box = build_posture_view(guild, policy)
     return await send_response(message, box)
 
 

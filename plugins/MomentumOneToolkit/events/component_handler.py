@@ -80,7 +80,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
         # ----------------------------------------------------------------------
         # Anti-Nuke Authority Enforcement
         # ----------------------------------------------------------------------
-        if custom_id.startswith(("an:", "an_wiz:", "an_wl:", "an_pn:", "an_th:", "an_perm:", "an_eo:", "sec:")):
+        if custom_id.startswith(("an:", "an_wiz:", "an_wl:", "an_pn:", "an_th:", "an_perm:", "an_eo:", "sec:", "sec_wiz:")):
             if not guild:
                 return
 

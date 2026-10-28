@@ -1076,6 +1076,165 @@ async def build_wizard_step11_view(guild: discord.Guild) -> Any:
 
 
 # ==============================================================================
+# Unified Setup & Quick Setup Architecture
+# ==============================================================================
+def build_unified_setup_view(guild: discord.Guild) -> Any:
+    """
+    Renders the unified Security Setup screen.
+    Offers 1-click Quick Setup (recommended Hard mode + Aegis + logging channels)
+    or the multi-step Advanced Guided Setup.
+    """
+    action_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"sec_wiz:quick_confirm:{guild.id}")
+            .set_label("Apply Quick Setup (Recommended)")
+            .set_style(ButtonStyle.Success)
+            .set_emoji(EMOJIS.get("zap", "⚡"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"sec_wiz:advanced:{guild.id}")
+            .set_label("Advanced Guided Setup")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("gear", "🛠️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"sec:hub:{guild.id}")
+            .set_label("Security Hub")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("shield", "🛡️"))
+        )
+    )
+
+    overview_text = (
+        f"**Welcome to Sentinel™ Security Setup**\n\n"
+        f"Choose how you want to configure your server's defensive posture:\n\n"
+        f"⚡ **1. Quick Setup (1-Click Recommended)**\n"
+        f"• **Defensive Mode:** `Hard Zero-Tolerance` (Automated mitigation)\n"
+        f"• **Observation System:** `Aegis Real-Time Correlation Engine` (Multi-vector detection)\n"
+        f"• **Audit & Forensic Logging:** Idempotently creates `#security-logs`, `#moderation-logs`, `#server-logs` with secured webhooks\n"
+        f"• **Emergency Containment:** Armed with reversible cryptographic baselines\n"
+        f"• **Immediate Posture Audit:** Live diagnostic verification across all roles\n\n"
+        f"🛠️ **2. Advanced Guided Setup**\n"
+        f"• Customize individual operating modes (`Hard`, `Ultimate`, `Hybrid`, `Custom`)\n"
+        f"• Custom vector rate limits, punishment triggers, whitelists, and recovery routes\n"
+        f"• Mode-adaptive flow that bypasses redundant steps for non-Custom modes"
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("default", "#0844C5"))
+        .add_text_display(f"### {EMOJIS.get('shield', '🛡️')} Sentinel™ Security Defense Setup")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(overview_text)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Security Infrastructure • Reversible Protection")
+        .build()
+    )
+
+
+async def execute_quick_setup(guild: discord.Guild, actor_id: Any) -> Any:
+    """
+    Executes 1-click Quick Setup:
+    Enables Hard mode, Aegis observation, creates/verifies logging channels,
+    and runs a live security posture diagnostic.
+    """
+    gid = str(guild.id)
+    from core.logging.webhook_logger import UnifiedWebhookLogger
+    from core.security.emergency_lockdown_manager import emergency_lockdown_manager
+    from core.security.protection_service import security_protection_service
+
+    # 1. Save AntiNuke configuration
+    cfg_update = {
+        "mode": AntiNukeConstants.MODE_HARD,
+        "enabled": True,
+        "setup_completed": True,
+        "observation_system_enabled": True,
+        "observation_mode": "advanced",
+        "monitored_events": list(AntiNukeConstants.USER_CONFIGURABLE_EVENTS),
+        "thresholds": get_default_thresholds(AntiNukeConstants.MODE_HARD),
+        "punishments": get_default_punishments(AntiNukeConstants.MODE_HARD),
+        "configured_by": str(actor_id),
+        "configured_at": time.time(),
+    }
+    await AntiNukeManager.save_guild_config(gid, cfg_update)
+
+    # 2. Configure Response Policy
+    policy = security_protection_service.get_policy(gid)
+    policy.auto_lockdown_enabled = True
+    policy.shadow_mode = False
+    policy.response_level = "lockdown"
+    security_protection_service.save_policy(policy)
+
+    # 3. Create or verify logging channels & webhooks
+    log_res = await UnifiedWebhookLogger.create_logging_setup_workflow(
+        guild=guild,
+        layout="category",
+        create_category=True,
+        separate_antinuke=True,
+    )
+
+    # 4. Perform fresh security posture diagnostic audit
+    posture = emergency_lockdown_manager.audit_guild_security_posture(guild, policy)
+
+    channels_count = len(log_res.get("created_channels", [])) + len(log_res.get("reused_channels", []))
+    score = posture.get("score", 100)
+    grade = posture.get("grade", "A")
+    overall = posture.get("overall_posture", "SECURE")
+
+    action_row = (
+        ActionRowBuilder()
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"sec:hub:{guild.id}")
+            .set_label("Open Security Hub")
+            .set_style(ButtonStyle.Primary)
+            .set_emoji(EMOJIS.get("shield", "🛡️"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"lck:posture:{guild.id}")
+            .set_label("Audit Full Posture")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("info", "📋"))
+        )
+        .add_button(
+            ButtonBuilder()
+            .set_custom_id(f"log_cfg:panel:{guild.id}")
+            .set_label("Logging Panel")
+            .set_style(ButtonStyle.Secondary)
+            .set_emoji(EMOJIS.get("gear", "⚙️"))
+        )
+    )
+
+    desc = (
+        f"{EMOJIS.get('check', '✅')} **Sentinel™ Quick Setup Applied Successfully!**\n\n"
+        f"• **Operating Mode:** `Hard Zero-Tolerance` (Armed & Active)\n"
+        f"• **Observation Engine:** `Aegis Real-Time Correlation` (Enabled)\n"
+        f"• **Containment Engine:** `Live Emergency Armed` (Reversible)\n"
+        f"• **Logging Webhooks:** `{channels_count}` channels secured in category `{log_res.get('category_name', 'SENTINEL LOGS')}`\n"
+        f"• **Security Posture Score:** `{score} / 100` (Grade `{grade}` - `{overall}`)\n\n"
+        f"All defensive gateway listeners, sliding windows, and forensic telemetry are active."
+    )
+
+    return (
+        ContainerBuilder()
+        .set_accent_color(COLORS.get("success", "#3FD438"))
+        .add_text_display(f"### {EMOJIS.get('check', '✅')} Defense Architecture Armed")
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_text_display(desc)
+        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(action_row)
+        .add_text_display(f"-# {settings.BOT_NAME} Autonomous Defense Engine")
+        .build()
+    )
+
+
+# ==============================================================================
 # Command Entrypoint
 # ==============================================================================
 async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
@@ -1135,5 +1294,14 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         "completed_steps": {1},
     }
 
-    view = await build_wizard_step1_view(guild)
+    sub = args[0].lower() if args else ""
+    if sub in ["quick", "fast", "express", "recommend", "recommended"]:
+        view = await execute_quick_setup(guild, author.id)
+        return await send_response(message, view)
+    elif sub in ["advanced", "guided", "wizard", "manual"]:
+        view = await build_wizard_step1_view(guild)
+        return await send_response(message, view)
+
+    # Default entry: Unified Setup View
+    view = build_unified_setup_view(guild)
     return await send_response(message, view)

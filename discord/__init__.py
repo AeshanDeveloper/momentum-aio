@@ -647,18 +647,10 @@ class Channel(BaseItem):
         self.type = type
         self.guild = None
         self._client = None
-    async def send(self, *args, **kwargs):
-        client = getattr(self, "_client", None) or Client._default_instance
-        if client and client.token:
-            content = args[0] if args else kwargs.get("content")
-            return await client.http_send_message(self.id, content=content, **kwargs)
-        return Message(channel=self, guild=getattr(self, "guild", None))
-
-class TextChannel(Channel):
-    def __init__(self, id: int = 0, name: str = ""):
-        super().__init__(id, name, ChannelType.text)
         self.overwrites: Dict[Any, Any] = {}
         self.position: int = 0
+        self.category = None
+        self._cached_webhooks: List[Any] = []
 
     def permissions_for(self, member_or_role: Any) -> Permissions:
         if getattr(member_or_role, "guild_permissions", None) and member_or_role.guild_permissions.administrator:
@@ -670,6 +662,10 @@ class TextChannel(Channel):
                 attach_files=True,
                 read_messages=True,
                 manage_messages=True,
+                manage_webhooks=True,
+                manage_channels=True,
+                connect=True,
+                speak=True,
             )
 
         base_view = True
@@ -694,6 +690,9 @@ class TextChannel(Channel):
             view_channel=base_view,
             send_messages=base_send,
             read_messages=base_view,
+            manage_webhooks=getattr(getattr(member_or_role, "guild_permissions", None), "manage_webhooks", True),
+            connect=base_view,
+            speak=base_send,
         )
 
     async def send(self, *args, **kwargs):
@@ -702,6 +701,7 @@ class TextChannel(Channel):
             content = args[0] if args else kwargs.get("content")
             return await client.http_send_message(self.id, content=content, **kwargs)
         return Message(channel=self, guild=getattr(self, "guild", None))
+
     async def set_permissions(self, target: Any, overwrite: Optional[Any] = None, reason: Optional[str] = None, **kwargs):
         if overwrite is None and kwargs:
             ow = self.overwrites.get(target) or PermissionOverwrite()
@@ -712,6 +712,10 @@ class TextChannel(Channel):
             self.overwrites.pop(target, None)
         else:
             self.overwrites[target] = overwrite
+
+        client = getattr(self, "_client", None) or Client._default_instance
+        if client and client.token:
+            await client.http_set_channel_permissions(self.id, target, self.overwrites.get(target), reason=reason)
         return self
 
     async def edit(self, *, overwrites: Optional[Dict[Any, Any]] = None, name: Optional[str] = None, reason: Optional[str] = None, **kwargs):
@@ -723,8 +727,39 @@ class TextChannel(Channel):
             setattr(self, k, v)
         return self
 
-    async def delete(self, **kwargs): pass
+    async def delete(self, **kwargs):
+        client = getattr(self, "_client", None) or Client._default_instance
+        if client and client.token:
+            await client.http_delete_channel(self.id)
+        if self.guild and hasattr(self.guild, "channels"):
+            self.guild.channels = [c for c in self.guild.channels if c.id != self.id]
+            if hasattr(self.guild, "text_channels"):
+                self.guild.text_channels = [c for c in self.guild.text_channels if c.id != self.id]
+            if hasattr(self.guild, "voice_channels"):
+                self.guild.voice_channels = [c for c in self.guild.voice_channels if c.id != self.id]
+            if hasattr(self.guild, "categories"):
+                self.guild.categories = [c for c in self.guild.categories if c.id != self.id]
 
+    async def webhooks(self) -> List[Any]:
+        client = getattr(self, "_client", None) or Client._default_instance
+        if client and client.token:
+            return await client.http_get_channel_webhooks(self.id)
+        return list(getattr(self, "_cached_webhooks", []))
+
+    async def create_webhook(self, name: str, **kwargs) -> Any:
+        client = getattr(self, "_client", None) or Client._default_instance
+        if client and client.token:
+            return await client.http_create_channel_webhook(self.id, name=name, **kwargs)
+        if not hasattr(self, "_cached_webhooks"):
+            self._cached_webhooks = []
+        wh_id = max([w.id for w in self._cached_webhooks], default=self.id * 10) + 1
+        wh = Webhook(id=wh_id, name=name, url=f"https://discord.com/api/webhooks/{wh_id}/mock_token_{wh_id}")
+        self._cached_webhooks.append(wh)
+        return wh
+
+class TextChannel(Channel):
+    def __init__(self, id: int = 0, name: str = ""):
+        super().__init__(id, name, ChannelType.text)
 
 class VoiceChannel(Channel):
     def __init__(self, id: int = 0, name: str = ""):
@@ -733,10 +768,23 @@ class VoiceChannel(Channel):
 class CategoryChannel(Channel):
     def __init__(self, id: int = 0, name: str = ""):
         super().__init__(id, name, ChannelType.category)
-        self.channels = []
+        self.channels: List[Any] = []
 
-class StageChannel(Channel): pass
-class Thread(Channel): pass
+    @property
+    def text_channels(self) -> List[Any]:
+        return [c for c in self.channels if getattr(c, "type", None) == ChannelType.text or isinstance(c, TextChannel)]
+
+    @property
+    def voice_channels(self) -> List[Any]:
+        return [c for c in self.channels if getattr(c, "type", None) == ChannelType.voice or isinstance(c, VoiceChannel)]
+
+class StageChannel(Channel):
+    def __init__(self, id: int = 0, name: str = ""):
+        super().__init__(id, name, ChannelType.stage_voice)
+
+class Thread(Channel):
+    def __init__(self, id: int = 0, name: str = ""):
+        super().__init__(id, name, ChannelType.public_thread)
 
 class abc:
     class GuildChannel(Channel): pass
@@ -809,22 +857,51 @@ class Guild(BaseItem):
         return Member(id=user_id, name=f"User_{user_id}", guild=self)
 
     async def create_text_channel(self, name: str, **kwargs):
+        client = getattr(self, "_client", None) or Client._default_instance
+        if client and client.token:
+            ch = await client.http_create_guild_channel(self.id, name=name, type=0, **kwargs)
+            if ch:
+                ch.guild = self
+                ch._client = client
+                self.channels.append(ch)
+                self.text_channels.append(ch)
+                category = kwargs.get("category")
+                if category:
+                    ch.category = category
+                    if hasattr(category, "channels") and ch not in category.channels:
+                        category.channels.append(ch)
+                return ch
         ch_id = max([c.id for c in self.channels], default=self.id * 10) + 1
         ch = TextChannel(id=ch_id, name=name)
         ch.guild = self
+        ch._client = client
+        if "overwrites" in kwargs and kwargs["overwrites"]:
+            ch.overwrites = dict(kwargs["overwrites"])
         category = kwargs.get("category")
         if category:
             ch.category = category
-            if hasattr(category, "channels"):
+            if hasattr(category, "channels") and ch not in category.channels:
                 category.channels.append(ch)
         self.channels.append(ch)
         self.text_channels.append(ch)
         return ch
 
     async def create_category(self, name: str, **kwargs):
+        client = getattr(self, "_client", None) or Client._default_instance
+        if client and client.token:
+            cat = await client.http_create_guild_channel(self.id, name=name, type=4, **kwargs)
+            if cat:
+                cat.guild = self
+                cat._client = client
+                self.categories.append(cat)
+                self.channels.append(cat)
+                return cat
         cat_id = max([c.id for c in self.categories], default=self.id * 10 + 50) + 1
         cat = CategoryChannel(id=cat_id, name=name)
         cat.guild = self
+        cat._client = client
+        if "overwrites" in kwargs and kwargs["overwrites"]:
+            cat.overwrites = dict(kwargs["overwrites"])
         self.categories.append(cat)
         self.channels.append(cat)
         return cat
@@ -2114,3 +2191,134 @@ class Client:
         except Exception as err:
             _discord_logger.error(f"[REST] Followup send error: {err}")
         return Message(channel=getattr(interaction, "channel", None), guild=getattr(interaction, "guild", None))
+
+    async def http_create_guild_channel(self, guild_id: int, name: str, type: int = 0, **kwargs) -> Optional[Channel]:
+        if not self.token:
+            return None
+        import aiohttp
+        session = self._session or aiohttp.ClientSession()
+        headers = {"Authorization": f"Bot {self.token}", "Content-Type": "application/json"}
+        url = f"https://discord.com/api/v10/guilds/{guild_id}/channels"
+        body: Dict[str, Any] = {"name": name, "type": type}
+        if "category" in kwargs and kwargs["category"]:
+            body["parent_id"] = str(kwargs["category"].id)
+        if "topic" in kwargs and kwargs["topic"]:
+            body["topic"] = str(kwargs["topic"])
+        try:
+            async with session.post(url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                if resp.status in (200, 201):
+                    data = await resp.json()
+                    ch_id = int(data["id"])
+                    ch_type = data.get("type", type)
+                    ch_name = data.get("name", name)
+                    if ch_type == 4:
+                        cat = CategoryChannel(id=ch_id, name=ch_name)
+                        cat._client = self
+                        return cat
+                    elif ch_type == 2:
+                        vc = VoiceChannel(id=ch_id, name=ch_name)
+                        vc._client = self
+                        return vc
+                    else:
+                        tc = TextChannel(id=ch_id, name=ch_name)
+                        tc._client = self
+                        return tc
+        except Exception as err:
+            _discord_logger.error(f"[REST] Create channel error: {err}")
+        return None
+
+    async def http_delete_channel(self, channel_id: int) -> None:
+        if not self.token:
+            return
+        import aiohttp
+        session = self._session or aiohttp.ClientSession()
+        headers = {"Authorization": f"Bot {self.token}"}
+        url = f"https://discord.com/api/v10/channels/{channel_id}"
+        try:
+            async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                pass
+        except Exception as err:
+            _discord_logger.error(f"[REST] Delete channel error: {err}")
+
+    async def http_set_channel_permissions(self, channel_id: int, target: Any, overwrite: Optional[Any], reason: Optional[str] = None) -> None:
+        if not self.token:
+            return
+        import aiohttp
+        session = self._session or aiohttp.ClientSession()
+        headers = {"Authorization": f"Bot {self.token}", "Content-Type": "application/json"}
+        if reason:
+            headers["X-Audit-Log-Reason"] = reason
+        target_id = getattr(target, "id", target)
+        target_type = 0 if getattr(target, "is_default", None) or isinstance(target, Role) else 1
+        url = f"https://discord.com/api/v10/channels/{channel_id}/permissions/{target_id}"
+
+        if overwrite is None or overwrite is False:
+            try:
+                async with session.delete(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)):
+                    pass
+            except Exception as err:
+                _discord_logger.error(f"[REST] Delete channel permission error: {err}")
+            return
+
+        allow_val = 0
+        deny_val = 0
+        if isinstance(overwrite, PermissionOverwrite):
+            for k, v in getattr(overwrite, "__dict__", {}).items():
+                bit = DANGEROUS_PERMISSION_FLAGS.get(k, 0)
+                if not bit:
+                    perm_bits = {"send_messages": 1 << 11, "read_messages": 1 << 10, "view_channel": 1 << 10, "connect": 1 << 20, "speak": 1 << 21}
+                    bit = perm_bits.get(k, 0)
+                if v is True:
+                    allow_val |= bit
+                elif v is False:
+                    deny_val |= bit
+
+        body = {"allow": str(allow_val), "deny": str(deny_val), "type": target_type}
+        try:
+            async with session.put(url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=5)):
+                pass
+        except Exception as err:
+            _discord_logger.error(f"[REST] Set channel permissions error: {err}")
+
+    async def http_get_channel_webhooks(self, channel_id: int) -> List[Webhook]:
+        if not self.token:
+            return []
+        import aiohttp
+        session = self._session or aiohttp.ClientSession()
+        headers = {"Authorization": f"Bot {self.token}"}
+        url = f"https://discord.com/api/v10/channels/{channel_id}/webhooks"
+        try:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    res = []
+                    for w in data:
+                        wh = Webhook(id=int(w["id"]), name=w.get("name", ""), url=w.get("url", ""))
+                        u_data = w.get("user")
+                        if u_data:
+                            wh.user = User(id=int(u_data.get("id", 0)), name=u_data.get("username", ""))
+                        res.append(wh)
+                    return res
+        except Exception as err:
+            _discord_logger.error(f"[REST] Get channel webhooks error: {err}")
+        return []
+
+    async def http_create_channel_webhook(self, channel_id: int, name: str, **kwargs) -> Optional[Webhook]:
+        if not self.token:
+            return None
+        import aiohttp
+        session = self._session or aiohttp.ClientSession()
+        headers = {"Authorization": f"Bot {self.token}", "Content-Type": "application/json"}
+        url = f"https://discord.com/api/v10/channels/{channel_id}/webhooks"
+        body = {"name": name}
+        try:
+            async with session.post(url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+                if resp.status in (200, 201):
+                    data = await resp.json()
+                    wh = Webhook(id=int(data["id"]), name=data.get("name", name), url=data.get("url", ""))
+                    wh.user = self.user
+                    return wh
+        except Exception as err:
+            _discord_logger.error(f"[REST] Create channel webhook error: {err}")
+        return None
+

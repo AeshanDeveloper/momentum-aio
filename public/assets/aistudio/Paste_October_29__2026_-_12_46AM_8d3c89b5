@@ -1,0 +1,1002 @@
+Sentinel — Critical Security Repair & UX Overhaul
+
+You are working on Sentinel, a Discord server security bot implemented in Python.
+
+Your task is to audit, repair, test, and improve the existing security system, logging infrastructure, observation engine, security posture analyzer, and anti-nuke setup wizard.
+
+This is a functional repair task, not merely a UI redesign. Several features currently appear configured but do not perform their intended actions in real Discord servers.
+
+1. Critical Requirements
+
+Prioritize the work in this order:
+
+1. Restore real Discord logging.
+2. Fix emergency lockdown so it performs and verifies actual permission changes.
+3. Fix the logging setup wizard so it creates real Discord channels.
+4. Repair the security observation engine and event detection.
+5. Fix security posture calculation and refresh behavior.
+6. Redesign the anti-nuke setup wizard.
+7. Implement a unified Quick Setup / Advanced Setup security wizard.
+8. Make all relevant commands support prefix and slash invocation consistently.
+9. Simplify buttons, messages, error handling, and the overall UI.
+10. Add regression tests and verify the fixes against the actual SDK implementation.
+
+Do not simply modify configuration flags, add placeholder implementations, or report success because a database record was created.
+
+A configured feature must actually work. A successful operation must be verified.
+
+---
+
+2. Investigate the Existing Code Before Changing It
+
+Before implementing fixes:
+
+- Trace the existing implementations of emergency lockdown, logging, logging setup, anti-nuke setup, security posture, and event observation.
+- Identify the exact files, managers, services, event handlers, database collections, and Discord SDK methods involved.
+- Inspect the Git history to locate the last known working implementations of logging and security functionality.
+- Compare the current implementation with the previously working version.
+- Identify regressions introduced by recent changes.
+- Restore proven working logic where appropriate instead of unnecessarily rewriting it.
+- Preserve existing architecture, database compatibility, command registration, and SDK conventions.
+
+Do not guess API names or assume a Discord method exists. Inspect the installed library and local SDK wrappers before using an API.
+
+If the project includes custom Discord builders, response wrappers, event registries, or permission managers, use their actual interfaces.
+
+Do not replace working functionality merely to make the implementation look cleaner.
+
+---
+
+3. CRITICAL: Repair Emergency Lockdown
+
+Current logs contain errors such as:
+
+"'CategoryChannel' object has no attribute 'set_permissions'"
+
+"'VoiceChannel' object has no attribute 'set_permissions'"
+
+The lockdown reports that it completed, but zero permission changes were applied.
+
+This is a critical functional failure.
+
+3.1 Fix channel permission handling
+
+Audit every channel type processed by EmergencyLockdown.
+
+The implementation must correctly handle the actual channel classes supported by the installed Discord library.
+
+For discord.py-compatible APIs, verify whether the relevant operation is "set_permissions()" or whether the channel must be handled through another supported API.
+
+Do not assume all channel objects expose identical methods.
+
+Implement appropriate handling for:
+
+- Text channels.
+- Voice channels.
+- Announcement channels.
+- Forum channels.
+- Media channels, if supported.
+- Category channels.
+- Stage channels.
+- Other supported guild channel types.
+
+Handle category permission overwrites carefully.
+
+Discord channel permission overwrites and category permission synchronization have different implications. Do not assume that changing a category automatically updates every child channel.
+
+For lockdown, determine the intended effective permissions for each channel and verify the result.
+
+3.2 Implement real lockdown actions
+
+When Shadow Mode is disabled, the system must perform actual Discord API operations.
+
+Depending on the configured lockdown policy, this may include:
+
+- Denying "send_messages" to the appropriate member or role targets.
+- Denying "send_messages_in_threads" where appropriate.
+- Denying "add_reactions" if required by the policy.
+- Restricting "connect" for voice channels if required.
+- Applying appropriate restrictions to supported channel types.
+- Handling categories and individual channels correctly.
+- Preserving permissions that are unrelated to the intended lockdown.
+
+Do not blindly overwrite all permission overwrites.
+
+Do not remove administrator permissions or alter every role simply because an emergency has occurred. Apply a narrowly scoped, predefined containment policy that prevents further damage while preserving trusted administrators' ability to recover the server.
+
+Respect role hierarchy and Discord's permission rules.
+
+3.3 Shadow Mode must be trustworthy
+
+When Shadow Mode is enabled:
+
+- Do not perform destructive or permission-changing Discord API operations.
+- Calculate the actions that would have been performed.
+- Report the targets, intended changes, and reasons.
+- Clearly distinguish simulated changes from real changes.
+
+When Shadow Mode is disabled:
+
+- Perform the intended actions.
+- Record the actual API results.
+- Verify effective permissions where practical.
+- Report failures separately from successes.
+
+Never report simulated changes as applied changes.
+
+3.4 Correct lockdown reporting
+
+The current log reports fields such as:
+
+"Status: partial, Entries: 37, Applied: 0, Verified: 26, Skipped Hierarchy: 6"
+
+Investigate how these numbers are calculated.
+
+Define clear, non-overlapping outcome categories, such as:
+
+- Planned.
+- Applied.
+- Verified.
+- Failed.
+- Skipped.
+- Simulated.
+
+Do not count a planned operation as applied.
+
+Do not mark an action verified merely because a database record or permission-overwrite object was created.
+
+Verification must use actual Discord state wherever possible.
+
+If an API request fails, record the exception and affected target. Continue processing other eligible targets when safe.
+
+Make retries bounded and handle Discord rate limits correctly.
+
+---
+
+4. Restore the Entire Logging Infrastructure
+
+Logging used to work reliably in a previous version. It no longer behaves correctly.
+
+Treat this as a regression investigation.
+
+Audit the complete pipeline:
+
+Discord event
+→ Event listener
+→ Event normalization
+→ Guild configuration lookup
+→ Logging category selection
+→ Destination resolution
+→ Message/container construction
+→ Discord API delivery
+→ Delivery result
+→ Error reporting
+
+Find where events or messages are being lost.
+
+Do not fix only the visible symptoms.
+
+4.1 Restore event logging
+
+Ensure supported events actually produce logging records and Discord log messages when enabled.
+
+Audit, at minimum, the following categories:
+
+Member events
+
+- Member joins and leaves.
+- Member updates.
+- Bans and unbans.
+- Kicks when they can be reliably identified.
+- Timeouts and timeout removals.
+- Nickname changes.
+- Role additions and removals.
+- Member verification or screening events where supported.
+
+Message events
+
+- Message deletion.
+- Bulk message deletion.
+- Message edits.
+- Attachment changes when observable.
+- Relevant thread activity.
+
+Do not claim to recover deleted message content if the bot never observed or stored it.
+
+Channel events
+
+- Channel creation.
+- Channel deletion.
+- Channel updates.
+- Channel name changes.
+- Channel type changes when applicable.
+- Permission overwrite changes.
+- Category creation, deletion, and updates.
+- Channel movement between categories.
+- Thread creation, deletion, and updates where supported.
+
+Role events
+
+- Role creation.
+- Role deletion.
+- Role updates.
+- Permission changes.
+- Role position changes.
+
+Server events
+
+- Guild configuration changes.
+- Server name and icon changes.
+- Vanity URL changes where observable and supported.
+- Emoji and sticker changes.
+- Webhook creation, deletion, and updates where observable.
+- Integration changes where supported.
+- Other security-relevant guild events already supported by the project.
+
+Security events
+
+- Anti-nuke detections.
+- Suspicious activity.
+- Automated containment.
+- Lockdown initiation and completion.
+- Lockdown failures.
+- Configuration changes.
+- Trusted administrator actions.
+- Security posture changes.
+- Observation engine failures.
+
+Use the correct gateway events, intents, permissions, and library APIs. Do not invent events that the installed library or Discord gateway does not provide.
+
+Where a feature depends on audit logs, verify the bot has the necessary permissions and that the relevant entry can actually be retrieved.
+
+4.2 Audit log correlation
+
+When an event needs an actor identity:
+
+- Correlate the gateway event with the relevant Discord audit-log entry where possible.
+- Handle audit-log delays.
+- Avoid attributing an action to the wrong administrator.
+- Avoid repeatedly attributing an old audit-log entry to new events.
+- Use bounded retries and appropriate correlation identifiers or timestamps.
+- Distinguish an unknown actor from a confirmed actor.
+
+Do not block urgent containment while waiting for audit-log attribution.
+
+The security system must be able to contain a dangerous event even when the actor is not yet known.
+
+4.3 Restore the logging destination system
+
+Determine how logging destinations were configured in the last working version.
+
+Restore the intended behavior for:
+
+- Global logging configuration, if supported.
+- Per-guild logging settings.
+- Logging categories.
+- Individual logging destinations.
+- Enabled and disabled event categories.
+- Webhook-based delivery.
+- Fallback behavior.
+- Configuration persistence across restarts.
+
+Prevent duplicate event subscriptions and duplicate log delivery.
+
+Ensure one event is not logged multiple times because several managers registered the same listener.
+
+Do not silently swallow exceptions.
+
+Logging failures should be visible to developers without creating an infinite logging-error loop.
+
+4.4 Logging must reflect reality
+
+Every log message must describe an event or action that actually occurred.
+
+For example:
+
+- Do not report a channel as deleted if deletion failed.
+- Do not report a permission as changed if the API request failed.
+- Do not report lockdown as successful if no restrictions were applied.
+- Do not report a webhook as created until creation succeeds.
+- Do not claim a log was delivered when Discord rejected the request.
+
+Use accurate statuses and clear failure messages.
+
+---
+
+5. Fix the Logging Setup Wizard
+
+The logging setup wizard currently appears to complete successfully without creating the expected Discord channels.
+
+Fix the complete setup flow.
+
+5.1 Expected behavior
+
+When an administrator runs the logging setup wizard:
+
+1. Validate the invoking user's permissions.
+2. Validate the bot's permissions.
+3. Show the intended configuration.
+4. Allow the administrator to select the setup type or logging configuration where appropriate.
+5. Create the actual Discord category and logging channels through the Discord API.
+6. Create or configure webhooks if the selected delivery mode requires them.
+7. Persist the actual created resource IDs and configuration.
+8. Verify that the resources exist and are accessible.
+9. Report exactly what was created and what failed.
+
+Do not treat a database insert as successful Discord channel creation.
+
+5.2 Safe creation behavior
+
+Before creating resources:
+
+- Check for existing compatible logging categories and channels.
+- Reuse valid resources where appropriate.
+- Avoid duplicate categories and channels.
+- Respect existing administrator configurations.
+- Check channel naming and permission requirements.
+- Check the bot's effective permissions.
+
+If some resources already exist, reconcile the configuration instead of creating duplicates.
+
+If creation fails halfway through, report partial completion and preserve enough information to resume or safely retry.
+
+Never delete unrelated existing channels to make the wizard appear clean.
+
+5.3 Configuration validation
+
+After setup, confirm that:
+
+- The created channels are real Discord channels.
+- Their IDs are stored correctly.
+- The logging dispatcher can resolve them.
+- The bot can send messages to them.
+- Events configured for those destinations actually arrive.
+- The configuration survives a bot restart.
+
+A successful wizard must result in a functioning logging system, not merely a completed UI.
+
+---
+
+6. Repair the Security Observation Engine
+
+The observation system appears to contain event configuration without reliably observing the actual events.
+
+Audit the full observation lifecycle.
+
+6.1 Configuration must control real listeners
+
+For each supported security event:
+
+1. Confirm that a real event listener exists.
+2. Confirm that the listener is registered exactly once.
+3. Confirm that it receives the expected Discord event.
+4. Confirm that the event is normalized into the internal event format.
+5. Confirm that the observation configuration is loaded.
+6. Confirm that enabled events are evaluated.
+7. Confirm that disabled events are not accidentally processed as enabled.
+8. Confirm that observations are stored or dispatched as designed.
+9. Confirm that detections can reach the configured response system.
+10. Confirm that relevant events can reach the logging system.
+
+Do not build a dashboard that says an event is monitored when no working listener exists.
+
+6.2 Event registry and coverage
+
+Create or repair a central event registry that maps supported events to:
+
+- Discord event names.
+- Required intents and permissions.
+- Normalization handlers.
+- Observation handlers.
+- Logging handlers.
+- Detection capabilities.
+- Supported response actions.
+- Known limitations.
+
+Use human-readable names in the UI rather than exposing internal snake_case identifiers.
+
+Show meaningful states such as:
+
+- Active.
+- Disabled by configuration.
+- Missing required permission.
+- Unsupported by the current library.
+- Temporarily degraded.
+- Failed to initialize.
+
+Do not mark an event active merely because it appears in configuration.
+
+6.3 Observation accuracy
+
+Implement robust detection windows and event aggregation.
+
+Examples include:
+
+- Repeated channel deletions.
+- Repeated role deletions.
+- Mass bans.
+- Rapid member kicks.
+- Dangerous permission changes.
+- Repeated webhook creation.
+- Suspicious role or channel creation.
+- Multiple destructive actions by the same actor.
+
+Use configurable thresholds and time windows.
+
+Correlate events using reliable actor identities when available. Where the actor cannot be established, clearly indicate that uncertainty.
+
+Prioritize containment during high-confidence destructive activity.
+
+Avoid aggressive automatic punishments based on a single ambiguous event.
+
+Prevent duplicate alerts and duplicate automated actions for the same incident.
+
+6.4 Monitoring health
+
+Add internal diagnostics so developers can establish whether the system is actually running.
+
+Useful diagnostics include:
+
+- Registered listener count.
+- Supported event count.
+- Active observation count.
+- Last event received.
+- Last successful evaluation.
+- Last successful security log.
+- Event-processing failures.
+- Configuration loading failures.
+- Queue backlog, if queues are used.
+
+Use bounded metrics and summaries rather than storing every event indefinitely.
+
+---
+
+7. Fix Security Posture Calculation and Refresh
+
+The security posture command currently appears stale or incorrect.
+
+Repair the actual calculations and the command's refresh behavior.
+
+7.1 Recalculate from current Discord state
+
+Every explicit security posture recheck must obtain fresh information from Discord wherever the relevant state is available.
+
+Inspect:
+
+- Guild roles.
+- Role permissions.
+- Role hierarchy.
+- Administrator permissions.
+- Dangerous moderation permissions.
+- Channel permission overwrites.
+- Important bot permissions.
+- Relevant security configuration.
+- Anti-nuke settings.
+- Logging configuration.
+- Observation coverage.
+- Lockdown configuration and operational health.
+
+Do not rely exclusively on old database snapshots.
+
+If caching is necessary, define a clear invalidation strategy and bypass stale cached results during an explicit recheck.
+
+7.2 Identify dangerous permissions
+
+If a role is flagged as dangerous, explicitly list the permissions responsible for that classification.
+
+Examples include:
+
+- Administrator.
+- Manage Guild.
+- Manage Roles.
+- Manage Channels.
+- Ban Members.
+- Kick Members.
+- Manage Webhooks.
+- Moderate Members.
+- Other permissions relevant to the implemented security policy.
+
+These are examples, not an instruction to treat every permission identically.
+
+Use the actual Discord permission flags.
+
+For each flagged role, display:
+
+- Role name.
+- Relevant permissions.
+- Whether the role is above or below the bot's highest role.
+- Whether the bot can manage that role.
+- The reason it contributes to the security assessment.
+- A recommended remediation, where appropriate.
+
+Do not label a role dangerous without explaining why.
+
+Do not assume that a role is manageable solely because the bot has Administrator permission. Discord's role hierarchy and special permission restrictions still matter.
+
+7.3 Correct posture scoring
+
+Review the scoring logic so the result corresponds to actual security conditions.
+
+The assessment should consider:
+
+- Excessive privileged roles.
+- Weak or missing anti-nuke protection.
+- Missing logging destinations.
+- Inactive observation handlers.
+- Insufficient bot permissions.
+- Missing or ineffective lockdown configuration.
+- Stale or unavailable data.
+
+Avoid arbitrary scoring that rewards configuration without verifying operational functionality.
+
+Separate confirmed vulnerabilities from warnings, informational findings, and checks that could not be completed.
+
+7.4 Refresh controls
+
+Make the recheck button and command perform a real refresh.
+
+After rechecking:
+
+- Update the calculated result.
+- Update the displayed findings.
+- Update the dangerous permission list.
+- Update the last-checked timestamp.
+- Update the database snapshot if the design uses one.
+- Show a clear failure if a required data source cannot be checked.
+
+Do not merely refresh the Discord message using the same cached result.
+
+---
+
+8. Redesign the Anti-Nuke Setup Wizard
+
+The current anti-nuke setup wizard is unnecessarily complicated and contains steps that do not make sense for every mode.
+
+Redesign it around the actual selected operating mode.
+
+8.1 Mode selection
+
+Start with a clear mode selection screen.
+
+Only offer modes that are genuinely implemented.
+
+Explain each mode briefly, including its purpose and relevant limitations.
+
+The next steps must be dynamically generated from the selected mode.
+
+8.2 Conditional steps
+
+Do not force administrators through irrelevant configuration screens.
+
+For example:
+
+- If a mode does not use a particular approval mechanism, omit that configuration step.
+- If logging is already configured, reuse the existing destinations.
+- If a setting is mandatory for the chosen mode, make it explicit.
+- If a setting is optional, provide a sensible default.
+- If a capability is unsupported or unavailable, explain why rather than pretending it is configured.
+
+Do not duplicate configuration already managed by the main security system.
+
+8.3 Setup validation
+
+Before completing setup:
+
+- Validate the chosen mode.
+- Validate required permissions.
+- Validate necessary event listeners.
+- Validate the logging destination.
+- Validate the required response actions.
+- Validate that essential settings were persisted.
+- Identify limitations that could prevent the selected mode from operating correctly.
+
+The completion screen must distinguish configured settings from verified functionality.
+
+---
+
+9. Create a Unified Security Setup Wizard
+
+Add a comprehensive server security setup command with two initial choices:
+
+1. Quick Setup
+2. Advanced Setup
+
+Use the existing command naming conventions and architecture.
+
+9.1 First screen
+
+The initial screen should clearly explain:
+
+Quick Setup: Applies recommended baseline security settings automatically, using safe defaults and minimal interaction.
+
+Advanced Setup: Lets administrators inspect and customize the supported security settings individually.
+
+Use compact Discord Components V2 containers and clear buttons.
+
+Avoid unnecessary prose, duplicate navigation buttons, and long lists of technical implementation details.
+
+9.2 Quick Setup
+
+Quick Setup should configure sensible defaults for all safely automatable baseline settings.
+
+Where supported, this should include:
+
+- Recommended anti-nuke mode and thresholds.
+- Security event observation.
+- Security logging.
+- Logging destination selection or creation.
+- Emergency lockdown configuration.
+- Dangerous permission analysis.
+- Security posture calculation.
+- Relevant detection and response settings.
+- Required permission validation.
+- Verification of critical capabilities.
+
+Reuse existing valid channels and configuration where possible.
+
+Do not silently overwrite established server settings.
+
+If a default requires an administrator decision, present the minimum necessary choice rather than making an unsafe assumption.
+
+Do not promise protection for capabilities that the bot cannot enforce.
+
+Quick Setup should be short because it applies good defaults, not because it skips important checks.
+
+At the end, show:
+
+- Successfully configured features.
+- Verified working features.
+- Features requiring administrator attention.
+- Permissions the bot is missing.
+- Unsupported or degraded capabilities.
+- A button to view the security posture.
+
+9.3 Advanced Setup
+
+Advanced Setup must allow the administrator to review and configure the complete set of supported security settings.
+
+Organize settings into logical groups, for example:
+
+1. General security.
+2. Anti-nuke mode.
+3. Detection thresholds.
+4. Event observation.
+5. Security logging.
+6. Emergency lockdown.
+7. Role and permission security.
+8. Automated response policies.
+9. Trusted administrators and recovery access.
+10. Notifications and incident reporting.
+11. Security posture and diagnostics.
+12. Final validation.
+
+Adapt the list to the actual features in the codebase. Do not invent settings that have no implementation.
+
+Each step should explain what the setting does, its default, and any meaningful trade-offs.
+
+Allow administrators to skip optional sections while preventing completion when genuinely required settings are invalid.
+
+9.4 Wizard persistence and recovery
+
+The wizard must:
+
+- Persist valid settings.
+- Handle navigation reliably.
+- Avoid applying changes before confirmation where appropriate.
+- Prevent duplicate resource creation.
+- Support cancellation.
+- Handle expired interactions.
+- Handle Discord API errors.
+- Avoid duplicate component handlers.
+- Prevent unrelated users from controlling an administrator's active setup session.
+- Support safe retry after partial failure.
+- Revalidate critical settings before reporting completion.
+
+If a wizard is interrupted, the server should not be left in a misleading state.
+
+---
+
+10. Simplify the Discord UI
+
+The UI should look trustworthy, professional, and easy to understand.
+
+Use the project's established visual style and centralized configuration.
+
+UI requirements
+
+- Use compact Components V2 containers where supported.
+- Use buttons for primary actions.
+- Use select menus when choosing among several options.
+- Use modals for appropriate text or numeric input.
+- Keep descriptions concise.
+- Use consistent status labels.
+- Use clear success, warning, and failure states.
+- Remove redundant buttons.
+- Remove navigation actions that do not perform useful work.
+- Remove unnecessary setup steps.
+- Do not show internal database details or implementation identifiers to ordinary administrators.
+
+Prefer straightforward actions such as:
+
+- Quick Setup.
+- Advanced Setup.
+- Enable.
+- Disable.
+- Configure.
+- Recheck.
+- Back.
+- Cancel.
+- Finish Setup.
+- View Findings.
+
+Only show actions relevant to the current screen.
+
+Disable or remove buttons when their actions are unavailable.
+
+Ensure button callbacks, select menus, and modal submissions work correctly after navigation.
+
+Do not create an interface with many buttons that perform essentially the same action.
+
+All visible strings, colors, and emojis must use the existing centralized configuration system where required by the project.
+
+Do not introduce hardcoded UI colors or emoji placeholders if the project already provides configuration files for them.
+
+---
+
+11. Make Security Commands Consistent
+
+The following commands must support both prefix and slash invocation:
+
+- Logging setup and logging management.
+- Anti-nuke setup and configuration.
+- Explain.
+- Security.
+- Security posture and its recheck operation.
+- Emergency lockdown and related management operations.
+- Unified security setup.
+- Other existing security commands that are intended to be public and hybrid.
+
+Inspect the existing command registry and command decorators before making changes.
+
+Prefix and slash commands must invoke the same underlying business logic.
+
+Do not maintain separate implementations for each invocation type.
+
+They must produce equivalent results, enforce equivalent authorization, and handle failures consistently.
+
+Use the correct response method for each invocation type.
+
+Handle deferred responses, ephemeral responses, component interactions, and follow-up messages correctly.
+
+Preserve the project's existing owner-only and administrator-only restrictions.
+
+Do not make sensitive security operations available to unauthorized users simply to make the commands easier to invoke.
+
+Verify that commands are actually registered and discoverable, including the Explain command.
+
+---
+
+12. Permissions and Role Hierarchy
+
+Audit the permission checks across:
+
+- Setup commands.
+- Security commands.
+- Explain commands.
+- Emergency lockdown.
+- Channel creation.
+- Webhook management.
+- Role analysis.
+- Automated containment.
+
+Distinguish between:
+
+1. The invoking user's permissions.
+2. The bot's guild-level permissions.
+3. The bot's effective permissions in a particular channel.
+4. Role hierarchy restrictions.
+5. Discord API restrictions.
+
+Do not display generic warnings that the bot lacks permission when it actually has the required permission.
+
+Likewise, do not assume that Administrator bypasses role hierarchy.
+
+Check the real Discord objects and effective permissions.
+
+When a permission is missing, identify the exact missing permission and explain which operation requires it.
+
+Avoid duplicate warnings and stale permission results.
+
+---
+
+13. Reliability, Concurrency, and Error Handling
+
+Review all affected asynchronous code.
+
+Ensure that:
+
+- Discord API calls are awaited correctly.
+- Database operations are awaited correctly.
+- Async iterators and cursors are used according to the installed library.
+- Event handlers do not register repeatedly.
+- Multiple security events cannot trigger conflicting lockdown operations.
+- Duplicate incidents are deduplicated.
+- Per-guild state is isolated correctly.
+- Failed tasks are logged with useful context.
+- Long-running tasks do not block event processing.
+- Rate limits are respected.
+- Timeouts and retries are bounded.
+- Critical containment is not unnecessarily delayed by slow logging or database writes.
+
+Keep emergency actions independent from nonessential reporting.
+
+For example, a logging destination failure must not prevent a valid emergency lockdown from executing.
+
+Do not swallow exceptions merely to make the bot appear stable.
+
+---
+
+14. Testing Requirements
+
+Do not stop after editing the code.
+
+Create or update tests for every repaired subsystem.
+
+Required test scenarios
+
+Emergency lockdown
+
+- Text channels.
+- Voice channels.
+- Categories.
+- Other supported channel types.
+- Shadow Mode enabled.
+- Shadow Mode disabled.
+- Missing permissions.
+- Hierarchy restrictions.
+- Discord API failures.
+- Partial success.
+- Duplicate lockdown requests.
+- Verification of actual resulting permissions.
+
+Logging
+
+- Each supported event category.
+- Enabled and disabled events.
+- Missing logging configuration.
+- Invalid destination.
+- Deleted logging channel.
+- Missing send permissions.
+- Webhook delivery failures.
+- Duplicate listener prevention.
+- Restart and configuration persistence.
+
+Logging setup
+
+- Creation of real Discord categories and channels.
+- Reuse of existing resources.
+- Partial creation failure.
+- Missing permissions.
+- Retry after failure.
+- Event delivery after setup.
+
+Observation engine
+
+- Listener registration.
+- Event normalization.
+- Configuration lookup.
+- Threshold evaluation.
+- Incident deduplication.
+- Unknown actor handling.
+- Automatic response dispatch.
+- Disabled monitoring.
+- Missing intents or permissions.
+
+Security posture
+
+- Fresh role data.
+- Fresh channel overwrites.
+- Dangerous permission identification.
+- Role hierarchy evaluation.
+- Missing logging configuration.
+- Inactive observation handlers.
+- Recheck after configuration changes.
+- API failures and incomplete assessments.
+
+Setup wizards
+
+- Quick Setup.
+- Advanced Setup.
+- Mode-specific steps.
+- Navigation and cancellation.
+- Permission validation.
+- Resource creation.
+- Persistence.
+- Interrupted sessions.
+- Final validation.
+
+Commands
+
+- Prefix invocation.
+- Slash invocation.
+- Authorization.
+- Equivalent business logic.
+- Correct response handling.
+- Explain command registration.
+
+Use mocked Discord objects for unit tests, but do not mistake mocked success for proof of real Discord functionality.
+
+Where practical, run an integration test in a dedicated test guild to verify actual channel creation, permission updates, and logging delivery.
+
+Do not run destructive tests against an ordinary production server.
+
+---
+
+15. Implementation Rules
+
+Follow these rules throughout the task:
+
+1. Inspect before editing.
+2. Fix root causes rather than adding superficial workarounds.
+3. Reuse working code and proven implementations from Git history where appropriate.
+4. Do not invent SDK methods.
+5. Do not replace working architecture without a clear technical reason.
+6. Do not delete unrelated features.
+7. Do not silently change database schemas or discard configuration.
+8. Use backward-compatible migrations where necessary.
+9. Keep all asynchronous operations correct.
+10. Do not hardcode settings that belong in configuration.
+11. Do not report simulated actions as real.
+12. Do not report planned actions as successful.
+13. Do not swallow exceptions.
+14. Do not duplicate listeners or business logic.
+15. Do not claim that tests passed unless they were actually executed.
+
+Preserve existing working functionality, command permissions, and configuration wherever possible.
+
+If a feature is genuinely unsupported by Discord or the installed library, document the limitation and implement the safest available alternative.
+
+---
+
+16. Required Final Deliverable
+
+After implementing the fixes, provide a concise but specific report containing:
+
+1. Root causes identified.
+2. Files and modules changed.
+3. Logging functionality restored.
+4. Emergency lockdown behavior corrected.
+5. Observation events verified.
+6. Security posture calculations corrected.
+7. Setup wizard changes.
+8. Prefix and slash command coverage.
+9. Tests executed and their actual results.
+10. Any remaining limitations or unresolved failures.
+
+Clearly distinguish between:
+
+- Implemented.
+- Unit tested.
+- Integration tested.
+- Verified against a real Discord guild.
+- Not verified.
+
+Do not claim real-world verification if only mocked tests were run.
+
+Final objective
+
+Sentinel must become a reliable, operational Discord security system rather than a collection of configured but ineffective features.
+
+When an administrator enables logging, the events must actually be delivered.
+
+When an administrator configures observation, the relevant events must actually be monitored.
+
+When an administrator requests a lockdown with Shadow Mode disabled, the bot must perform real, authorized Discord permission changes and verify the outcome.
+
+When an administrator rechecks security posture, the result must reflect the latest available server state.
+
+When an administrator runs Quick Setup, the wizard must establish and verify a sensible baseline without unnecessary interaction.
+
+When an administrator chooses Advanced Setup, every supported security setting must be accessible through a clear, manageable workflow.
+
+Prioritize real functionality, verified security actions, low false-positive rates, accurate reporting, and a straightforward Discord UI.

@@ -39,6 +39,7 @@ class JournalEntryStatus:
     """State of an individual role or channel permission modification."""
     APPLIED = "applied"
     VERIFIED = "verified"
+    SIMULATED = "simulated"
     SKIPPED_HIERARCHY = "skipped_hierarchy"
     SKIPPED_PRESERVED = "skipped_preserved"
     FAILED_API = "failed_api"
@@ -49,6 +50,7 @@ class JournalEntryStatus:
     ALL = {
         APPLIED,
         VERIFIED,
+        SIMULATED,
         SKIPPED_HIERARCHY,
         SKIPPED_PRESERVED,
         FAILED_API,
@@ -216,13 +218,20 @@ class LockdownRecord:
         for e in self.entries:
             counts[e.status] = counts.get(e.status, 0) + 1
 
+        applied_entries = counts.get(JournalEntryStatus.APPLIED, 0) + counts.get(JournalEntryStatus.VERIFIED, 0)
+        skipped_total = counts.get(JournalEntryStatus.SKIPPED_HIERARCHY, 0) + counts.get(JournalEntryStatus.SKIPPED_PRESERVED, 0)
+
         self.summary = {
             "total_entries": len(self.entries),
-            "applied": counts.get(JournalEntryStatus.APPLIED, 0),
+            "planned": len(self.entries),
+            "applied": applied_entries,
             "verified": counts.get(JournalEntryStatus.VERIFIED, 0),
+            "simulated": counts.get(JournalEntryStatus.SIMULATED, 0),
             "skipped_hierarchy": counts.get(JournalEntryStatus.SKIPPED_HIERARCHY, 0),
             "skipped_preserved": counts.get(JournalEntryStatus.SKIPPED_PRESERVED, 0),
+            "skipped": skipped_total,
             "failed_api": counts.get(JournalEntryStatus.FAILED_API, 0),
+            "failed": counts.get(JournalEntryStatus.FAILED_API, 0),
             "restored": counts.get(JournalEntryStatus.RESTORED, 0),
             "conflict_detected": counts.get(JournalEntryStatus.CONFLICT_DETECTED, 0),
             "failed_restore": counts.get(JournalEntryStatus.FAILED_RESTORE, 0),

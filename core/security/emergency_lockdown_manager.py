@@ -363,7 +363,7 @@ class EmergencyLockdownManager:
 
             if is_shadow:
                 # Simulated shadow mode execution
-                entry.status = JournalEntryStatus.APPLIED
+                entry.status = JournalEntryStatus.SIMULATED
                 entry.metadata["shadow_mode"] = True
                 record.entries.append(entry)
             else:
@@ -439,7 +439,7 @@ class EmergencyLockdownManager:
                 continue
 
             if is_shadow:
-                entry.status = JournalEntryStatus.APPLIED
+                entry.status = JournalEntryStatus.SIMULATED
                 entry.metadata["shadow_mode"] = True
                 record.entries.append(entry)
             else:
@@ -450,22 +450,35 @@ class EmergencyLockdownManager:
                         # Copy existing settings
                         for k, v in getattr(current_ow, "__dict__", {}).items():
                             setattr(new_ow, k, v)
-                    # Apply explicit denies
-                    for perm_name in policy.channel_deny_permissions:
+                    # Apply explicit denies based on channel capabilities
+                    is_voice = getattr(ch, "type", None) == 2 or isinstance(ch, getattr(discord, "VoiceChannel", ()))
+                    deny_perms = list(policy.channel_deny_permissions)
+                    if is_voice:
+                        deny_perms.extend(["connect", "speak"])
+                    for perm_name in deny_perms:
                         setattr(new_ow, perm_name, False)
 
-                    await ch.set_permissions(
-                        default_role,
-                        overwrite=new_ow,
-                        reason=f"Sentinel Emergency Lockdown: Channel restricted for {record.incident_id}",
-                    )
+                    if hasattr(ch, "set_permissions"):
+                        await ch.set_permissions(
+                            default_role,
+                            overwrite=new_ow,
+                            reason=f"Sentinel Emergency Lockdown: Channel restricted for {record.incident_id}",
+                        )
+                    elif hasattr(ch, "edit"):
+                        cur_ows = dict(getattr(ch, "overwrites", {}))
+                        cur_ows[default_role] = new_ow
+                        await ch.edit(
+                            overwrites=cur_ows,
+                            reason=f"Sentinel Emergency Lockdown: Channel restricted for {record.incident_id}",
+                        )
+
                     entry.status = JournalEntryStatus.VERIFIED
                     record.entries.append(entry)
                 except Exception as err:
                     entry.status = JournalEntryStatus.FAILED_API
                     entry.error = str(err)
                     record.entries.append(entry)
-                    logger.error(f"[EmergencyLockdown] Failed to set permissions on channel {ch.name}: {err}")
+                    logger.error(f"[EmergencyLockdown] Failed to set permissions on channel {getattr(ch, 'name', cid_str)}: {err}")
 
     # Reversible Recovery Execution
     async def restore_lockdown(
@@ -810,12 +823,73 @@ class EmergencyLockdownManager:
             "detail": f"Current enforcement mode: {mode_str}. Auto-lockdown: {'Enabled' if pol.auto_lockdown_enabled else 'Disabled (Safe Shadow)'}.",
         })
 
+        # 6. Detailed Dangerous Role Permissions Breakdown
+        dangerous_roles_breakdown = []
+        for r in roles:
+            if r.is_default() or getattr(r, "managed", False):
+                continue
+            r_perms = getattr(r, "permissions", None)
+            perm_val = getattr(r_perms, "value", 0) if r_perms else 0
+            held_dangerous = []
+            for p_name, bit in DANGEROUS_PERMISSION_FLAGS.items():
+                if (perm_val & bit) != 0 or getattr(r_perms, p_name, False):
+                    held_dangerous.append(p_name)
+            
+            if held_dangerous:
+                can_mod, mod_reason = self.can_modify_role(bot_member, r)
+                is_crit = ("administrator" in held_perms or "manage_roles" in held_perms) and not can_mod
+                sev = "CRITICAL" if is_crit else ("HIGH" if not can_mod else "MEDIUM")
+                dangerous_roles_breakdown.append({
+                    "role_id": str(r.id),
+                    "role_name": r.name,
+                    "position": r.position,
+                    "dangerous_permissions": held_dangerous,
+                    "can_manage": can_mod,
+                    "reason": mod_reason,
+                    "severity": sev,
+                    "remediation": f"Move Sentinel above '{r.name}' to contain it" if not can_mod else "Verify legitimate staff assignment",
+                })
+
+        # Compute Numeric Posture Score (0 - 100)
+        score = 100
+        for f in findings:
+            if f.get("status") == "CRITICAL" and not f.get("passed", False):
+                score -= 20
+            elif f.get("status") == "WARNING" and not f.get("passed", False):
+                score -= 10
+
+        # Deduct for unmanageable dangerous roles
+        unmanageable_count = sum(1 for dr in dangerous_roles_breakdown if not dr["can_manage"])
+        score -= min(25, unmanageable_count * 8)
+
+        if pol.shadow_mode:
+            score -= 5
+
+        score = max(0, min(100, score))
+        if score >= 90:
+            grade = "A"
+        elif score >= 75:
+            grade = "B"
+        elif score >= 60:
+            grade = "C"
+        elif score >= 40:
+            grade = "D"
+        else:
+            grade = "F"
+
+        is_secure = is_ready and score >= 75 and not any(f["status"] == "CRITICAL" for f in findings)
+        overall = "SECURE" if is_secure else "ACTION_REQUIRED"
+
         return {
             "guild_id": gid,
             "guild_name": getattr(guild, "name", "Unknown Server"),
             "audit_timestamp": time.time(),
-            "overall_posture": "SECURE" if is_ready and not any(f["status"] == "CRITICAL" for f in findings) else "ACTION_REQUIRED",
+            "overall_posture": overall,
+            "score": score,
+            "max_score": 100,
+            "grade": grade,
             "findings": findings,
+            "dangerous_roles": dangerous_roles_breakdown,
             "checklist": [
                 {
                     "item": f["check"],

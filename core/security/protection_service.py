@@ -188,12 +188,8 @@ class SecurityProtectionService:
     def on_incident_event(self, incident: Incident, assessment: AssessmentResult) -> None:
         """
         Callback invoked by IncidentManager when an incident is created or updated.
-        Evaluates emergency response and schedules asynchronous execution.
+        Logs threat assessments to forensic channel and evaluates emergency containment.
         """
-        # Only act if emergency containment is recommended
-        if not assessment.should_trigger_immediate_response:
-            return
-
         try:
             loop = asyncio.get_running_loop()
             if loop.is_running():
@@ -207,7 +203,8 @@ class SecurityProtectionService:
 
     async def _process_incident_protection(self, incident: Incident, assessment: AssessmentResult) -> None:
         """
-        Asynchronously executes emergency containment and dispatches admin notifications.
+        Asynchronously executes emergency containment (if threshold met) and always
+        dispatches threat forensic telemetry to the configured forensic logs channel.
         """
         gid = str(incident.guild_id)
         policy = self.get_policy(gid)
@@ -224,25 +221,27 @@ class SecurityProtectionService:
         except (ValueError, TypeError):
             pass
 
-        # 1. Execute Emergency Containment
-        lockdown_record = await self.lockdown_manager.execute_emergency_lockdown(
-            guild=guild,
-            incident=incident,
-            assessment=assessment,
-            policy=policy,
-        )
-
-        # 2. Dispatch Interactive Alerts to Trusted Admins
-        if policy.response_level in (ResponseLevel.ALERT, ResponseLevel.LOCKDOWN):
-            await self.notifier.dispatch_emergency_alert(
-                bot_client=client or self.bot_client,
+        lockdown_record = None
+        # 1. Execute Emergency Containment ONLY if immediate response recommended
+        if assessment.should_trigger_immediate_response:
+            lockdown_record = await self.lockdown_manager.execute_emergency_lockdown(
                 guild=guild,
                 incident=incident,
-                lockdown_record=lockdown_record,
+                assessment=assessment,
                 policy=policy,
             )
 
-        # 3. Dispatch Threat Forensic Log directly to server's security forensic logs channel
+            # 2. Dispatch Interactive Alerts to Trusted Admins
+            if policy.response_level in (ResponseLevel.ALERT, ResponseLevel.LOCKDOWN):
+                await self.notifier.dispatch_emergency_alert(
+                    bot_client=client or self.bot_client,
+                    guild=guild,
+                    incident=incident,
+                    lockdown_record=lockdown_record,
+                    policy=policy,
+                )
+
+        # 3. Always Dispatch Threat Forensic Log to forensic logs channel and webhook logger
         await self.dispatch_threat_log(
             guild=guild,
             incident=incident,
@@ -269,13 +268,18 @@ class SecurityProtectionService:
         pol = policy or self.get_policy(gid)
 
         from core.security.antinuke import AntiNukeManager
+        from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
         cfg = AntiNukeManager.get_guild_config(gid)
+        log_cfg = UnifiedWebhookLogger.get_guild_logging_config(gid)
+        destinations = log_cfg.get("destinations", {})
+        sec_dest = destinations.get(LogCategory.SECURITY) or destinations.get("security-logs")
 
         target_channel = None
         candidate_ids = [
+            sec_dest.get("channel_id") if isinstance(sec_dest, dict) else None,
             pol.fallback_channel_id,
-            cfg.get("warning_channel_id"),
             cfg.get("log_channel_id"),
+            cfg.get("warning_channel_id"),
         ]
         for cid in candidate_ids:
             if cid and hasattr(guild, "get_channel"):
@@ -283,6 +287,16 @@ class SecurityProtectionService:
                     target_channel = guild.get_channel(int(cid))
                     if target_channel:
                         break
+                except Exception:
+                    pass
+
+        # Fallback search channels by name
+        if not target_channel and hasattr(guild, "text_channels"):
+            for ch in guild.text_channels:
+                ch_name = getattr(ch, "name", "").lower()
+                if "security-log" in ch_name or "forensic" in ch_name or "mod-log" in ch_name or "audit-log" in ch_name:
+                    target_channel = ch
+                    break
                 except Exception:
                     pass
 
