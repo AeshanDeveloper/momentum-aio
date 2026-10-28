@@ -60,14 +60,24 @@ async def main():
         await NoPrefixManager.initialize()
         await AntiNukeManager.initialize()
         from core.security.activity_manager import security_activity_manager
+        from core.security.correlation_engine import security_correlation_engine
+        from core.security.incident_manager import incident_manager
+        from core.security.protection_service import security_protection_service
         security_activity_manager.attach_to_collector()
-        logger.info("[MomentumOne] Security registries (ServerCommands, Blacklist, NoPrefix, AntiNuke) hydrated from storage; ActivityManager attached.")
+        security_correlation_engine.attach_to_collector()
+        security_correlation_engine.attach_to_activity_manager(security_activity_manager)
+        incident_manager.attach_to_correlation_engine()
+        security_protection_service.attach_to_incident_manager()
+        security_protection_service.hydrate_active_lockdowns()
+        logger.info("[MomentumOne] Security pipeline (Collector -> ActivityManager -> CorrelationEngine -> IncidentManager -> ProtectionService) initialized and hydrated.")
     except Exception as err:
         logger.error(f"[Startup] Database initialization or hydration failed: {err}")
 
     # Initialize Bot App
     bot_app = BotApp()
+    security_protection_service.bot_client = bot_app.bot
     await bot_app.bot.setup()
+
 
     # Initialize & Start Web API / Control Center Server on port 3000
     api_server = ApiServer(bot_manager=bot_app.bot)

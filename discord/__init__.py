@@ -142,21 +142,54 @@ class Colour:
 Color = Colour
 
 class Permissions:
-    def __init__(self, permissions: int = 0, **kwargs):
-        self.value = permissions
-        self.administrator = kwargs.get("administrator", False)
-        self.manage_guild = kwargs.get("manage_guild", False)
-        self.manage_roles = kwargs.get("manage_roles", False)
-        self.manage_channels = kwargs.get("manage_channels", False)
-        self.manage_webhooks = kwargs.get("manage_webhooks", False)
-        self.ban_members = kwargs.get("ban_members", False)
-        self.kick_members = kwargs.get("kick_members", False)
-        self.view_audit_log = kwargs.get("view_audit_log", False)
-        self.manage_messages = kwargs.get("manage_messages", False)
-        self.send_messages = kwargs.get("send_messages", True)
-        self.view_channel = kwargs.get("view_channel", True)
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    _FLAGS: Dict[str, int] = {
+        "kick_members": 1 << 1,
+        "ban_members": 1 << 2,
+        "administrator": 1 << 3,
+        "manage_channels": 1 << 4,
+        "manage_guild": 1 << 5,
+        "add_reactions": 1 << 6,
+        "view_audit_log": 1 << 7,
+        "view_channel": 1 << 10,
+        "send_messages": 1 << 11,
+        "manage_messages": 1 << 13,
+        "embed_links": 1 << 14,
+        "attach_files": 1 << 15,
+        "read_messages": 1 << 16,
+        "mention_everyone": 1 << 17,
+        "connect": 1 << 20,
+        "speak": 1 << 21,
+        "manage_roles": 1 << 28,
+        "manage_webhooks": 1 << 29,
+    }
+
+    def __init__(self, permissions: Optional[int] = None, **kwargs):
+        if permissions is not None:
+            self.value = int(permissions)
+            for name, bit in self._FLAGS.items():
+                setattr(self, name, bool(self.value & bit))
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+        else:
+            self.value = 0
+            for name, bit in self._FLAGS.items():
+                if name in kwargs:
+                    val = bool(kwargs[name])
+                    setattr(self, name, val)
+                    if val:
+                        self.value |= bit
+                else:
+                    setattr(self, name, False)
+
+            if not kwargs:
+                self.send_messages = True
+                self.view_channel = True
+                self.value = self._FLAGS["send_messages"] | self._FLAGS["view_channel"]
+
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+
 
 class SelectOption:
     def __init__(self, label: str, value: str, description: Optional[str] = None, emoji: Any = None, default: bool = False):
@@ -178,9 +211,38 @@ class Embed:
         self.description = kwargs.get("description")
         self.color = kwargs.get("color")
         self.fields = []
+        self.thumbnail = None
+        self.footer = None
+        self.image = None
+        self.author = None
+        self.timestamp = kwargs.get("timestamp")
+
     def add_field(self, name: str, value: str, inline: bool = False):
         self.fields.append({"name": name, "value": value, "inline": inline})
         return self
+
+    def set_thumbnail(self, *, url: str):
+        self.thumbnail = {"url": str(url)}
+        return self
+
+    def set_footer(self, *, text: str, icon_url: Optional[str] = None):
+        self.footer = {"text": str(text)}
+        if icon_url:
+            self.footer["icon_url"] = str(icon_url)
+        return self
+
+    def set_image(self, *, url: str):
+        self.image = {"url": str(url)}
+        return self
+
+    def set_author(self, *, name: str, icon_url: Optional[str] = None, url: Optional[str] = None):
+        self.author = {"name": str(name)}
+        if icon_url:
+            self.author["icon_url"] = str(icon_url)
+        if url:
+            self.author["url"] = str(url)
+        return self
+
     def to_dict(self):
         d = {}
         if self.title: d["title"] = self.title
@@ -190,6 +252,16 @@ class Embed:
             d["color"] = int(c)
         if self.fields:
             d["fields"] = [{"name": str(f["name"]), "value": str(f["value"]), "inline": bool(f.get("inline", False))} for f in self.fields]
+        if self.thumbnail:
+            d["thumbnail"] = self.thumbnail
+        if self.footer:
+            d["footer"] = self.footer
+        if self.image:
+            d["image"] = self.image
+        if self.author:
+            d["author"] = self.author
+        if self.timestamp:
+            d["timestamp"] = str(self.timestamp)
         return d
 
 class File:
@@ -324,6 +396,15 @@ class Role(BaseItem):
         self.guild = guild
         self._client = None
     def is_default(self): return self.position == 0
+    async def edit(self, *, permissions: Optional[Any] = None, name: Optional[str] = None, reason: Optional[str] = None, **kwargs):
+        if permissions is not None:
+            self.permissions = permissions
+        if name is not None:
+            self.name = name
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return self
+
 
 class Member(User):
     def __init__(self, id: int = 0, name: str = "", guild: Any = None):
@@ -399,7 +480,29 @@ class TextChannel(Channel):
             content = args[0] if args else kwargs.get("content")
             return await client.http_send_message(self.id, content=content, **kwargs)
         return Message(channel=self, guild=getattr(self, "guild", None))
+    async def set_permissions(self, target: Any, overwrite: Optional[Any] = None, reason: Optional[str] = None, **kwargs):
+        if overwrite is None and kwargs:
+            ow = self.overwrites.get(target) or PermissionOverwrite()
+            for k, v in kwargs.items():
+                setattr(ow, k, v)
+            self.overwrites[target] = ow
+        elif overwrite is None or overwrite is False:
+            self.overwrites.pop(target, None)
+        else:
+            self.overwrites[target] = overwrite
+        return self
+
+    async def edit(self, *, overwrites: Optional[Dict[Any, Any]] = None, name: Optional[str] = None, reason: Optional[str] = None, **kwargs):
+        if overwrites is not None:
+            self.overwrites = dict(overwrites)
+        if name is not None:
+            self.name = name
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return self
+
     async def delete(self, **kwargs): pass
+
 
 class VoiceChannel(Channel):
     def __init__(self, id: int = 0, name: str = ""):
