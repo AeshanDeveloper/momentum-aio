@@ -497,7 +497,12 @@ class SectionBuilder:
         if text is not None and str(text).strip():
             from config.strings import render_string
             rendered = render_string(str(text).strip())
-            self.components.append(discord.ui.TextDisplay(rendered))
+            display = discord.ui.TextDisplay(rendered)
+            try:
+                display.text = rendered
+            except AttributeError:
+                pass
+            self.components.append(display)
         return self
 
     def set_thumbnail_accessory(self, url: str) -> SectionBuilder:
@@ -546,7 +551,12 @@ class ContainerBuilder:
         if text is not None and str(text).strip():
             from config.strings import render_string
             rendered = render_string(str(text).strip())
-            self._components.append(discord.ui.TextDisplay(rendered))
+            display = discord.ui.TextDisplay(rendered)
+            try:
+                display.text = rendered
+            except AttributeError:
+                pass
+            self._components.append(display)
         return self
 
     def add_separator(

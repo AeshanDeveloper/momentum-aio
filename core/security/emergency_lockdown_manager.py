@@ -527,8 +527,9 @@ class EmergencyLockdownManager:
 
             # Process entries for restoration
             for entry in record.entries:
-                # Only restore entries that were actually APPLIED/VERIFIED or previously FAILED_RESTORE
-                if entry.status not in (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED, JournalEntryStatus.FAILED_RESTORE):
+                # Only restore entries that were actually APPLIED/VERIFIED, previously FAILED_RESTORE, or CONFLICT_DETECTED on forced retry
+                eligible_statuses = (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED, JournalEntryStatus.FAILED_RESTORE)
+                if entry.status not in eligible_statuses and not (force and entry.status == JournalEntryStatus.CONFLICT_DETECTED):
                     continue
 
                 if entry.target_type == "role":
@@ -598,7 +599,12 @@ class EmergencyLockdownManager:
         entry.current_state = {"permissions_value": current_val}
 
         applied_val = entry.applied_state.get("permissions_value")
+        if applied_val is None:
+            applied_val = entry.applied_state.get("permissions")
+
         before_val = entry.before_state.get("permissions_value")
+        if before_val is None:
+            before_val = entry.before_state.get("permissions")
 
         # Conflict Detection:
         # If current state != what Sentinel applied, an admin modified it independently post-lockdown!

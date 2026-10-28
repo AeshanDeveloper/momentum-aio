@@ -327,16 +327,28 @@ class SentinelSecurityPipeline:
 
             # Enrich with known actor if already resolved in calling context
             if actor:
+                is_wl = None
+                if details:
+                    if "is_whitelisted" in details:
+                        is_wl = bool(details["is_whitelisted"])
+                    elif "is_whitelisted_actor" in details:
+                        is_wl = bool(details["is_whitelisted_actor"])
                 sec_event.enrich_actor(
                     actor_id=str(actor.id),
                     actor_name=str(actor),
                     reason=details.get("reason") if details else None,
                     confidence=AttributionConfidence.VERIFIED,
+                    is_whitelisted=is_wl,
                     source_id=str(audit_entry_id) if audit_entry_id else None,
                 )
 
             if details:
                 sec_event.metadata.update(details)
+                if sec_event.is_whitelisted_actor is None:
+                    if "is_whitelisted" in details:
+                        sec_event.is_whitelisted_actor = bool(details["is_whitelisted"])
+                    elif "is_whitelisted_actor" in details:
+                        sec_event.is_whitelisted_actor = bool(details["is_whitelisted_actor"])
 
             # Ingest into observation layer
             self._processed_event_count += 1
@@ -437,11 +449,16 @@ class SentinelSecurityPipeline:
                     hierarchy_status["reasons"].append(f"Missing permissions: {', '.join(missing)}")
                     hierarchy_status["can_act"] = False
 
-                higher_roles = [r.name for r in guild.roles if r > bot_top and not r.managed]
+                bot_pos = getattr(bot_top, "position", 0)
+                higher_roles = [
+                    getattr(r, "name", str(r))
+                    for r in getattr(guild, "roles", [])
+                    if getattr(r, "position", 0) > bot_pos and not getattr(r, "managed", False)
+                ]
                 hierarchy_status["higher_roles"] = higher_roles[:5]
                 if higher_roles:
                     hierarchy_status["reasons"].append(
-                        f"{len(higher_roles)} role(s) above bot role '{bot_top.name}' cannot be restricted during emergency"
+                        f"{len(higher_roles)} role(s) above bot role '{getattr(bot_top, 'name', 'bot')}' cannot be restricted during emergency"
                     )
 
         # 8. Supported Handlers Count (all 23 vectors)

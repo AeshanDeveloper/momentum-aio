@@ -15,6 +15,7 @@ Key capabilities:
 from __future__ import annotations
 
 import time
+import inspect
 import asyncio
 import threading
 from typing import Dict, Any, List, Optional, Set, Union
@@ -102,6 +103,10 @@ class SecurityProtectionService:
         logger.info(f"[ProtectionService] Hydrated {len(active_lockdowns)} active/partial lockdown(s) from storage")
         return active_lockdowns
 
+    def is_lockdown_active(self, guild_id: Union[str, int]) -> bool:
+        """Checks if a guild currently has an active or partial lockdown in the journal."""
+        return self.journal.get_active_lockdown_for_guild(guild_id) is not None
+
     # Policy Management
     def get_policy(self, guild_id: Union[str, int]) -> SecurityResponsePolicy:
         """Retrieves or loads the security response policy for a guild."""
@@ -113,7 +118,15 @@ class SecurityProtectionService:
         # Attempt to load from MongoDB
         try:
             doc = database.find_one("security_response_policies", {"guild_id": gid})
-            if doc:
+            if inspect.isawaitable(doc):
+                # find_one returned a coroutine; schedule background hydration if loop is running
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        loop.create_task(self._hydrate_policy_async(gid, doc))
+                except RuntimeError:
+                    pass
+            elif isinstance(doc, dict):
                 policy = SecurityResponsePolicy.from_dict(doc)
                 with self._lock:
                     self._policies[gid] = policy
@@ -126,6 +139,33 @@ class SecurityProtectionService:
         with self._lock:
             self._policies[gid] = default_pol
         return default_pol
+
+    async def _hydrate_policy_async(self, gid: str, doc_coro: Any) -> None:
+        try:
+            doc = await doc_coro
+            if doc and isinstance(doc, dict):
+                policy = SecurityResponsePolicy.from_dict(doc)
+                with self._lock:
+                    self._policies[gid] = policy
+        except Exception as err:
+            logger.debug(f"[ProtectionService] Async policy hydration failed for {gid}: {err}")
+
+    async def get_policy_async(self, guild_id: Union[str, int]) -> SecurityResponsePolicy:
+        """Asynchronously retrieves or loads the security response policy for a guild."""
+        gid = str(guild_id)
+        with self._lock:
+            if gid in self._policies:
+                return self._policies[gid]
+        try:
+            doc = await database.find_one("security_response_policies", {"guild_id": gid})
+            if doc and isinstance(doc, dict):
+                policy = SecurityResponsePolicy.from_dict(doc)
+                with self._lock:
+                    self._policies[gid] = policy
+                return policy
+        except Exception as err:
+            logger.debug(f"[ProtectionService] Failed to load policy async from DB: {err}")
+        return self.get_policy(gid)
 
     def save_policy(self, policy: SecurityResponsePolicy) -> None:
         """Saves a security response policy to memory and MongoDB."""

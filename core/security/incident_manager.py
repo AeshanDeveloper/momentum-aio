@@ -520,13 +520,13 @@ class IncidentManager:
         return None
 
     def get_active_incidents(self, guild_id: str) -> List[Incident]:
-        """Retrieves all ACTIVE or UNDER_REVIEW incidents for a guild."""
+        """Retrieves all ACTIVE, UNDER_REVIEW, or CONTAINED incidents for a guild."""
         gid = str(guild_id)
         with self._sync_lock:
             guild_incs = list(self._incidents.get(gid, {}).values())
         return [
             inc for inc in guild_incs
-            if inc.status in (IncidentStatus.ACTIVE, IncidentStatus.UNDER_REVIEW)
+            if inc.status in (IncidentStatus.ACTIVE, IncidentStatus.UNDER_REVIEW, IncidentStatus.CONTAINED)
         ]
 
     def list_incidents(

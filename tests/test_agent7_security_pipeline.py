@@ -650,6 +650,8 @@ class TestAgent7SecurityPipeline(unittest.IsolatedAsyncioTestCase):
             is_shadow_mode=False,
         )
         # Entry 1: will succeed
+        mod_role = MockRole(role_id=101, name="ModRole", position=10)
+        self.guild.roles.append(mod_role)
         entry1 = JournalEntry(
             entity_id="101",
             entity_type="role",

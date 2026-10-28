@@ -74,6 +74,8 @@ class JournalEntry:
     applied_state: Dict[str, Any] = field(default_factory=dict)
     current_state: Optional[Dict[str, Any]] = None
     restored_state: Optional[Dict[str, Any]] = None
+    original_state: Optional[Dict[str, Any]] = None
+    modified_state: Optional[Dict[str, Any]] = None
     
     status: str = JournalEntryStatus.APPLIED
     error: Optional[str] = None
@@ -98,6 +100,17 @@ class JournalEntry:
         elif self.target_name and not self.entity_name:
             self.entity_name = str(self.target_name)
 
+        # Synchronize before_state <-> original_state and applied_state <-> modified_state
+        if self.original_state is not None and not self.before_state:
+            self.before_state = dict(self.original_state)
+        elif self.before_state and self.original_state is None:
+            self.original_state = dict(self.before_state)
+
+        if self.modified_state is not None and not self.applied_state:
+            self.applied_state = dict(self.modified_state)
+        elif self.applied_state and self.modified_state is None:
+            self.modified_state = dict(self.applied_state)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "entry_id": self.entry_id,
@@ -109,6 +122,8 @@ class JournalEntry:
             "target_name": self.target_name,
             "before_state": self.before_state,
             "applied_state": self.applied_state,
+            "original_state": self.before_state,
+            "modified_state": self.applied_state,
             "current_state": self.current_state,
             "restored_state": self.restored_state,
             "status": self.status,
@@ -120,6 +135,8 @@ class JournalEntry:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "JournalEntry":
+        before = data.get("before_state") or data.get("original_state", {})
+        applied = data.get("applied_state") or data.get("modified_state", {})
         return cls(
             entry_id=data.get("entry_id", f"jrn_{uuid.uuid4().hex[:12]}"),
             lockdown_id=data.get("lockdown_id", ""),
@@ -128,8 +145,10 @@ class JournalEntry:
             target_id=str(data.get("target_id", "")),
             secondary_id=str(data.get("secondary_id")) if data.get("secondary_id") else None,
             target_name=data.get("target_name"),
-            before_state=data.get("before_state", {}),
-            applied_state=data.get("applied_state", {}),
+            before_state=before,
+            applied_state=applied,
+            original_state=before,
+            modified_state=applied,
             current_state=data.get("current_state"),
             restored_state=data.get("restored_state"),
             status=data.get("status", JournalEntryStatus.APPLIED),
@@ -178,6 +197,16 @@ class LockdownRecord:
         }
         raw_json = json.dumps(baseline_payload, sort_keys=True, default=str)
         return hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
+
+    def add_entry(self, entry: JournalEntry) -> None:
+        """Appends a journal entry and updates summary counters and checksum."""
+        if self.lockdown_id and not entry.lockdown_id:
+            entry.lockdown_id = self.lockdown_id
+        if self.guild_id and not entry.guild_id:
+            entry.guild_id = self.guild_id
+        self.entries.append(entry)
+        self.update_summary()
+        self.checksum = self.calculate_checksum()
 
     def update_summary(self) -> None:
         """Calculates counters for modified, skipped, failed, and conflict entries."""
