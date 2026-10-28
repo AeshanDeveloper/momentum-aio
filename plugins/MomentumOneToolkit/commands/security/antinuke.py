@@ -20,7 +20,7 @@ from sdk.discord.response import send_response, send_ui
 from shared.types.command_record import CommandType
 
 name = "antinuke"
-aliases = ["an", "security"]
+aliases = ["an"]
 description = "Enterprise Anti-Nuke defense control center, interactive configuration, and monitoring."
 category = "Security"
 usage = "antinuke [dashboard|setup|mode|events|status]"
@@ -63,6 +63,9 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
         mode = AntiNukeConstants.MODE_HARD
 
     mode_display = AntiNukeManager.get_mode_display_name(mode)
+    obs_enabled = AntiNukeManager.is_observation_system_enabled(guild.id)
+    obs_name = AntiNukeManager.get_observation_system_name(guild.id)
+
     monitored_events = cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)
     log_ch_id = cfg.get("log_channel_id")
     log_ch_str = f"<#{log_ch_id}>" if log_ch_id else "*Not Configured*"
@@ -78,13 +81,22 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
 
     c_accent = COLORS.get("success" if (is_setup and is_enabled) else "warning", "#0844C5")
 
+    if obs_enabled:
+        obs_display = f"👁️ **{obs_name}** `[ENABLED]`\n  ↳ Real-time event normalization, sliding correlation windows, graduated attribution & automated containment."
+        wl_posture = "🛡️ **Graduated Whitelist Protection**: Whitelisted actors execute normal administrative tasks freely. Destructive multi-event bursts are cross-correlated in the observation journal."
+    else:
+        obs_display = f"⚡ **{obs_name}** `[ACTIVE]`\n  ↳ Direct single-vector threshold gatekeeping with immediate reactive sanctions."
+        wl_posture = "🛡️ **Direct Whitelist Bypass**: Whitelisted entities completely bypass event threshold checks."
+
     summary_text = (
         f"{status_line}\n\n"
-        f"• **Active Security Mode:** `{mode_display}`\n"
-        f"• **Enabled Monitored Events:** `{len(monitored_events)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)}` vectors\n"
+        f"• **Active Defensive Mode:** `{mode_display}`\n"
+        f"• **Observation Engine:** {obs_display}\n"
+        f"• **Whitelist Protocol:** {wl_posture}\n"
+        f"• **Monitored Vectors:** `{len(monitored_events)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)}` events\n"
         f"• **Incident Forensics Log:** {log_ch_str}\n"
         f"• **Security Warning Channel:** {warn_ch_str}\n\n"
-        f"Use the **Manage Settings** menu below to navigate focused configuration panels."
+        f"Use the interactive controls below to configure operating modes, observation systems, and defense policies."
     )
 
     # Row 1: Primary Controls
@@ -106,30 +118,60 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
             .set_emoji(EMOJIS.get("wrench", "🔧"))
         )
 
+    # Observation System Toggle Button
+    obs_btn_label = "Aegis Engine: Active" if obs_enabled else "Aegis Engine: Off"
+    obs_btn_style = ButtonStyle.Success if obs_enabled else ButtonStyle.Secondary
+    action_row_1.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an:toggle_obs:{guild.id}")
+        .set_label(obs_btn_label)
+        .set_style(obs_btn_style)
+        .set_emoji("👁️")
+    )
+
+    # Operating Mode Switcher Button
+    action_row_1.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"an:cycle_mode:{guild.id}")
+        .set_label(f"Mode: {mode.title()}")
+        .set_style(ButtonStyle.Primary)
+        .set_emoji(EMOJIS.get("shield", "🛡️"))
+    )
+
     # Dedicated "Manage Events" button
     action_row_1.add_button(
         ButtonBuilder()
         .set_custom_id(f"an:panel:events:{guild.id}")
-        .set_label("Manage Events")
-        .set_style(ButtonStyle.Primary)
+        .set_label("Events")
+        .set_style(ButtonStyle.Secondary)
         .set_emoji(EMOJIS.get("tools", "🔧"))
     )
-    action_row_1.add_button(
+
+    # Row 2: Secondary Controls
+    action_row_2 = ActionRowBuilder()
+    action_row_2.add_button(
         ButtonBuilder()
         .set_custom_id(f"an_pn:dashboard:{guild.id}")
         .set_label("Punishments")
         .set_style(ButtonStyle.Secondary)
         .set_emoji(EMOJIS.get("danger", "⚡"))
     )
-    action_row_1.add_button(
+    action_row_2.add_button(
         ButtonBuilder()
         .set_custom_id(f"an_th:dashboard:{guild.id}")
         .set_label("Thresholds")
         .set_style(ButtonStyle.Secondary)
         .set_emoji(EMOJIS.get("gear", "⚙️"))
     )
+    action_row_2.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"sec:hub:{guild.id}")
+        .set_label("Security Command Hub")
+        .set_style(ButtonStyle.Primary)
+        .set_emoji(EMOJIS.get("shield", "🛡️"))
+    )
 
-    # Row 2: "Manage Settings" String Select Menu
+    # Row 3: "Manage Settings" String Select Menu
     settings_select = (
         SelectMenuBuilder()
         .set_custom_id(f"an:panel_select:{guild.id}")
@@ -137,6 +179,7 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
     )
     panels = [
         ("Anti-Nuke Overview", "overview", "Full configuration and defense posture summary"),
+        ("Observation Engine Controls", "observation", "Toggle Aegis Real-Time Correlation vs Standard Heuristic Engine"),
         ("Security Settings", "security", "Operating defense mode and live monitoring switch"),
         ("Event Manager", "events", "Enable or disable individual monitored vectors"),
         ("Threshold Manager", "thresholds", "Action count limits and sliding time windows"),
@@ -151,7 +194,7 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
     for label, val, p_desc in panels:
         settings_select.add_option(label=label[:100], value=val, description=p_desc[:100])
 
-    # Row 3: Utility Controls
+    # Row 4: Utility Controls
     action_row_nav = (
         ActionRowBuilder()
         .add_button(
@@ -185,6 +228,7 @@ async def build_dashboard_view(guild: discord.Guild) -> Any:
         .add_text_display(summary_text)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_action_row(action_row_1)
+        .add_action_row(action_row_2)
         .add_action_row(ActionRowBuilder().add_select_menu(settings_select))
         .add_action_row(action_row_nav)
         .add_text_display(f"-# {settings.BOT_NAME} Security Infrastructure • Enterprise Sentinel")
@@ -754,6 +798,70 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
     if sub in ["events", "event"]:
         view = await build_event_manager_panel(guild)
         return await send_response(message, view)
+
+    # Observation System Switcher
+    if sub in ["obs", "observation", "engine"]:
+        arg_val = args[1].lower() if len(args) > 1 else "toggle"
+        curr_obs = AntiNukeManager.is_observation_system_enabled(guild.id)
+        if arg_val in ["on", "enable", "true", "1", "advanced", "aegis"]:
+            new_obs = True
+            mode_type = "advanced"
+        elif arg_val in ["off", "disable", "false", "0", "standard"]:
+            new_obs = False
+            mode_type = "standard"
+        else:
+            new_obs = not curr_obs
+            mode_type = "advanced" if new_obs else "standard"
+
+        await AntiNukeManager.set_observation_system(guild.id, new_obs, mode_type)
+        eng_name = AntiNukeManager.get_observation_system_name(guild.id)
+        status_word = "Activated" if new_obs else "Set to Standard Heuristic"
+        box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("success", "#3FD438"))
+            .add_text_display(f"### 👁️ Observation Engine {status_word}")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"Defensive observation system for **{guild.name}** updated:\n\n"
+                f"• **Active Engine:** `{eng_name}`\n"
+                f"• **Correlation Pipeline:** `{'Aegis Real-Time Correlation' if new_obs else 'Standard Event Gatekeeper'}`\n"
+                f"• **Whitelist Protocol:** `{'Graduated Trust & Anomaly Telemetry' if new_obs else 'Direct Action Threshold Bypass'}`\n\n"
+                f"The Anti-Nuke Dashboard and threat telemetry will adapt immediately to this engine."
+            )
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_action_row(
+                ActionRowBuilder()
+                .add_button(
+                    ButtonBuilder()
+                    .set_custom_id(f"an:dashboard:{guild.id}")
+                    .set_label("View Dashboard")
+                    .set_style(ButtonStyle.Primary)
+                    .set_emoji(EMOJIS.get("shield", "🛡️"))
+                )
+            )
+            .build()
+        )
+        return await send_response(message, box)
+
+    # Defensive Operating Mode Switcher
+    if sub in ["mode", "posture"]:
+        if len(args) > 1:
+            target_mode = args[1].lower()
+            if target_mode in [AntiNukeConstants.MODE_HARD, AntiNukeConstants.MODE_ULTIMATE, AntiNukeConstants.MODE_HYBRID]:
+                await AntiNukeManager.save_guild_config(str(guild.id), {"mode": target_mode})
+                mode_disp = AntiNukeManager.get_mode_display_name(target_mode)
+                box = (
+                    ContainerBuilder()
+                    .set_accent_color(COLORS.get("success", "#3FD438"))
+                    .add_text_display(f"### {EMOJIS.get('check', '✅')} Operating Mode Updated")
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_text_display(
+                        f"Defensive posture for **{guild.name}** updated to: `{mode_disp}`.\n\n"
+                        f"All dashboard threshold defaults and mitigation response algorithms are adjusted."
+                    )
+                    .build()
+                )
+                return await send_response(message, box)
 
     # Default: Show Compact Dashboard
     view = await build_dashboard_view(guild)

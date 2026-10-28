@@ -1,6 +1,7 @@
 import time
 import asyncio
 import re
+import inspect
 import collections
 from typing import Dict, Any, List, Optional, Set, Tuple
 try:
@@ -546,11 +547,43 @@ class AntiNukeManager:
             "thresholds": get_default_thresholds(default_mode),
             "punishments": get_default_punishments(default_mode),
             "quarantine_role_id": None,
+            "observation_system_enabled": True,
+            "observation_mode": "advanced",
             "created_at": time.time(),
             "updated_at": time.time(),
         }
         cls._guild_configs[gid] = default_config
         return default_config
+
+    OBSERVATION_ENGINE_ADVANCED = "advanced"
+    OBSERVATION_ENGINE_STANDARD = "standard"
+
+    @classmethod
+    def is_observation_system_enabled(cls, guild_id: str | int) -> bool:
+        """Checks whether the advanced real-time Aegis observation engine is active."""
+        cfg = cls.get_guild_config(str(guild_id))
+        return bool(cfg.get("observation_system_enabled", True))
+
+    @classmethod
+    def get_observation_system_name(cls, guild_id: str | int) -> str:
+        """Returns the formal branding name of the current active observation engine."""
+        enabled = cls.is_observation_system_enabled(guild_id)
+        if not enabled:
+            return "Standard Heuristic Engine"
+        mode = cls.get_guild_config(str(guild_id)).get("observation_mode", "advanced")
+        if mode == "standard":
+            return "Standard Heuristic Engine"
+        return "Aegis Advanced Correlation Engine"
+
+    @classmethod
+    async def set_observation_system(cls, guild_id: str | int, enabled: bool, mode: str = "advanced") -> Dict[str, Any]:
+        """Toggles or updates the guild observation system between Aegis Advanced and Standard."""
+        gid = str(guild_id)
+        updates = {
+            "observation_system_enabled": bool(enabled),
+            "observation_mode": mode if enabled else "standard",
+        }
+        return await cls.save_guild_config(gid, updates)
 
     @classmethod
     async def save_guild_config(cls, guild_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -563,7 +596,9 @@ class AntiNukeManager:
 
         try:
             col = database.collection("antinuke_configs")
-            await col.update_one({"guild_id": gid}, {"$set": cfg}, upsert=True)
+            res = col.update_one({"guild_id": gid}, {"$set": cfg}, upsert=True)
+            if inspect.isawaitable(res):
+                await res
         except Exception as err:
             logger.error(f"[AntiNukeManager] Failed to persist config for guild {gid}: {err}")
 

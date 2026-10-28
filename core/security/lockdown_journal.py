@@ -24,6 +24,7 @@ import hashlib
 import threading
 import asyncio
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Set, Union
 
@@ -31,6 +32,7 @@ from config.settings import settings
 from core.logging.logger import logger
 from database.database import database
 from core.security.response_policy import LockdownStatus
+
 
 
 class JournalEntryStatus:
@@ -313,14 +315,22 @@ class LockdownJournalManager:
         try:
             col = database.collection("security_lockdowns")
             if hasattr(col, "update_one"):
-                try:
-                    loop = asyncio.get_running_loop()
-                    if loop.is_running():
-                        loop.create_task(col.update_one(
+                async def _persist_record_async():
+                    try:
+                        res = col.update_one(
                             {"lockdown_id": record.lockdown_id},
                             {"$set": record.to_dict()},
                             upsert=True,
-                        ))
+                        )
+                        if inspect.isawaitable(res):
+                            await res
+                    except Exception as e:
+                        logger.debug(f"[LockdownJournal] Async persist error: {e}")
+
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        loop.create_task(_persist_record_async())
                 except RuntimeError:
                     pass
         except Exception as err:

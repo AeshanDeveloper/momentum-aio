@@ -191,6 +191,48 @@ class Permissions:
 
 
 
+def parse_emoji_dict(emoji: Any) -> Optional[Dict[str, Any]]:
+    if not emoji:
+        return None
+    if isinstance(emoji, dict):
+        d = dict(emoji)
+        if "name" not in d and "id" in d:
+            d["name"] = "emoji"
+        return d
+    if hasattr(emoji, "to_dict"):
+        res = emoji.to_dict()
+        if isinstance(res, dict):
+            return res
+    if isinstance(emoji, (Emoji, PartialEmoji)):
+        return {
+            "name": emoji.name,
+            "id": str(emoji.id) if emoji.id else None,
+            "animated": getattr(emoji, "animated", False),
+        }
+    if isinstance(emoji, str):
+        s = emoji.strip()
+        if not s:
+            return None
+        if s.startswith("{emoji:") and s.endswith("}"):
+            k = s[7:-1].strip()
+            try:
+                from config.settings import EMOJIS
+                s = EMOJIS.get(k, s)
+            except Exception:
+                pass
+        import re
+        m_anim = re.match(r"^<a:([a-zA-Z0-9_~]+):([0-9]+)>$", s)
+        if m_anim:
+            return {"name": m_anim.group(1), "id": str(m_anim.group(2)), "animated": True}
+        m_cust = re.match(r"^<:([a-zA-Z0-9_~]+):([0-9]+)>$", s)
+        if m_cust:
+            return {"name": m_cust.group(1), "id": str(m_cust.group(2)), "animated": False}
+        m_colon = re.match(r"^([a-zA-Z0-9_~]+):([0-9]+)$", s)
+        if m_colon:
+            return {"name": m_colon.group(1), "id": str(m_colon.group(2)), "animated": False}
+        return {"name": s, "id": None}
+    return None
+
 class SelectOption:
     def __init__(self, label: str, value: str, description: Optional[str] = None, emoji: Any = None, default: bool = False):
         self.label = label
@@ -202,8 +244,12 @@ class SelectOption:
     def to_dict(self):
         d = {"label": self.label, "value": self.value, "default": self.default}
         if self.description: d["description"] = self.description
-        if self.emoji: d["emoji"] = self.emoji
+        if self.emoji:
+            pe = parse_emoji_dict(self.emoji)
+            if pe:
+                d["emoji"] = pe
         return d
+
 
 class Embed:
     def __init__(self, **kwargs):
@@ -738,7 +784,25 @@ def serialize_discord_payload(
         payload["content"] = out_content
     if out_embeds:
         payload["embeds"] = out_embeds
+    def _sanitize_component_emojis(comp: Any) -> Any:
+        if isinstance(comp, dict):
+            if "emoji" in comp and not isinstance(comp["emoji"], dict):
+                pe = parse_emoji_dict(comp["emoji"])
+                if pe:
+                    comp["emoji"] = pe
+                else:
+                    comp.pop("emoji", None)
+            if "components" in comp and isinstance(comp["components"], list):
+                for sub in comp["components"]:
+                    _sanitize_component_emojis(sub)
+            if "options" in comp and isinstance(comp["options"], list):
+                for opt in comp["options"]:
+                    _sanitize_component_emojis(opt)
+        return comp
+
     if out_components:
+        for c in out_components:
+            _sanitize_component_emojis(c)
         payload["components"] = out_components
     if message_reference:
         payload["message_reference"] = message_reference
@@ -918,7 +982,10 @@ class ui:
             style_val = 5 if is_link else (self.style.value if hasattr(self.style, "value") else self.style)
             d = {"type": 2, "style": style_val, "disabled": self.disabled}
             if self.label: d["label"] = self.label
-            if self.emoji: d["emoji"] = self.emoji.to_dict() if hasattr(self.emoji, "to_dict") else self.emoji
+            if self.emoji:
+                pe = parse_emoji_dict(self.emoji)
+                if pe:
+                    d["emoji"] = pe
             if is_link:
                 if self.url: d["url"] = self.url
             else:

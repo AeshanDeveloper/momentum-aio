@@ -298,6 +298,14 @@ class EmergencyLockdownManager:
         preserved_role_ids = {str(rid) for rid in policy.preserved_recovery_role_ids}
         target_role_ids = {str(rid) for rid in policy.target_role_ids}
 
+        bot_perms = getattr(bot_member, "guild_permissions", Permissions()) if bot_member else Permissions()
+        bot_has_manage_roles = bool(getattr(bot_perms, "manage_roles", False) or getattr(bot_perms, "administrator", False))
+        if not bot_has_manage_roles:
+            logger.warning(
+                f"[EmergencyLockdown] Bot lacks manage_roles/administrator permission in guild {record.guild_id}. "
+                f"Role permissions cannot be stripped; recording hierarchy restrictions."
+            )
+
         for role in roles:
             rid_str = str(role.id)
 
@@ -339,7 +347,6 @@ class EmergencyLockdownManager:
                     if has_dangerous:
                         is_target = True
 
-
             if not is_target:
                 continue
 
@@ -373,9 +380,6 @@ class EmergencyLockdownManager:
                 entry.status = JournalEntryStatus.SKIPPED_HIERARCHY
                 entry.error = reason
                 record.entries.append(entry)
-                logger.warning(
-                    f"[EmergencyLockdown] Cannot strip permissions from role {role.name} ({rid_str}): {reason}"
-                )
                 continue
 
             # If current permissions already lack dangerous bits, skip

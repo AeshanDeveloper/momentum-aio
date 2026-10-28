@@ -142,9 +142,30 @@ async def build_whitelist_dashboard_view(guild: discord.Guild) -> Any:
     cfg = AntiNukeManager.get_guild_config(str(guild.id))
     whitelists = cfg.get("whitelists", {})
 
+    obs_enabled = AntiNukeManager.is_observation_system_enabled(guild.id)
+    obs_name = AntiNukeManager.get_observation_system_name(guild.id)
+    obs_mode = cfg.get("observation_mode", "advanced")
+
+    if obs_enabled and obs_mode == "advanced":
+        mode_note = (
+            f"• **Active Engine:** `{obs_name}` ({EMOJIS.get('check', '✅')} **Active**)\n"
+            f"  └ **Graduated Trust Policy:** Whitelisted actors bypass direct rate punishments, but anomalous velocity spikes are flagged in correlation telemetry."
+        )
+    elif obs_enabled:
+        mode_note = (
+            f"• **Active Engine:** `{obs_name}` ({EMOJIS.get('check', '✅')} **Active**)\n"
+            f"  └ **Standard Bypass Policy:** Whitelisted actors directly bypass rate counters and automated triggers."
+        )
+    else:
+        mode_note = (
+            f"• **Observation Engine:** `Disabled` ({EMOJIS.get('cross', '❌')} Inactive)\n"
+            f"  └ Whitelisted actors bypass standard anti-nuke threshold evaluations."
+        )
+
     lines: List[str] = []
     if not whitelists:
         content_text = (
+            f"{mode_note}\n\n"
             f"**No whitelisted entities configured.**\n\n"
             f"Only the **Server Owner** (`<@{guild.owner_id}>`) and configured **Extra Owners** "
             f"hold root administrative bypass authority.\n\n"
@@ -170,7 +191,7 @@ async def build_whitelist_dashboard_view(guild: discord.Guild) -> Any:
         if more_count > 0:
             lines.append(f"-# *...and {more_count} more configured whitelists.*")
 
-        content_text = f"**Configured Whitelists ({len(whitelists)}):**\n\n" + "\n".join(lines)
+        content_text = f"{mode_note}\n\n**Configured Whitelists ({len(whitelists)}):**\n\n" + "\n".join(lines)
 
     action_row = (
         ActionRowBuilder()

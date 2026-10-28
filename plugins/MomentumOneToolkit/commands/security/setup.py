@@ -45,6 +45,8 @@ def get_or_create_wizard_session(guild: discord.Guild) -> Dict[str, Any]:
             "guild_id": gid,
             "mode": cur_mode,
             "mode_confirmed": False,
+            "observation_system_enabled": cfg.get("observation_system_enabled", True),
+            "observation_mode": cfg.get("observation_mode", "advanced"),
             "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)),
             "events_confirmed": False,
             "thresholds": dict(cfg.get("thresholds") or get_default_thresholds(cur_mode)),
@@ -170,7 +172,7 @@ async def build_wizard_step1_view(guild: discord.Guild) -> Any:
 # Step 2: Defensive Operating Mode Selection
 # ==============================================================================
 async def build_wizard_step2_view(guild: discord.Guild) -> Any:
-    """Step 2/11: Operating Mode Selection (String Select Menu with enabled modes)."""
+    """Step 2/11: Operating Mode & Observation Engine Configuration."""
     sess = get_or_create_wizard_session(guild)
     sess["step"] = 2
     enabled_modes = AntiNukeConstants.get_enabled_modes()
@@ -178,6 +180,10 @@ async def build_wizard_step2_view(guild: discord.Guild) -> Any:
     if current_mode not in enabled_modes:
         current_mode = enabled_modes[0] if enabled_modes else AntiNukeConstants.MODE_HARD
         sess["mode"] = current_mode
+
+    obs_enabled = sess.get("observation_system_enabled", True)
+    obs_mode = sess.get("observation_mode", "advanced")
+    obs_name = "Aegis Advanced Correlation Engine" if obs_mode == "advanced" else "Standard Heuristic Engine"
 
     mode_select = (
         SelectMenuBuilder()
@@ -194,16 +200,43 @@ async def build_wizard_step2_view(guild: discord.Guild) -> Any:
             default=(m == current_mode),
         )
 
-    mode_status = f"**Current Selection:** `{AntiNukeManager.get_mode_display_name(current_mode)}`"
+    mode_status = f"• **Selected Mode:** `{AntiNukeManager.get_mode_display_name(current_mode)}`"
     if sess.get("mode_confirmed"):
-        mode_status += f" {EMOJIS.get('check', '✅')} *(User Confirmed)*"
+        mode_status += f" {EMOJIS.get('check', '✅')} *(Confirmed)*"
     else:
         mode_status += " *(Click menu option or Continue to confirm)*"
 
+    obs_badge = f"{EMOJIS.get('check', '✅')} **Enabled**" if obs_enabled else f"{EMOJIS.get('cross', '❌')} **Disabled**"
+
+    obs_desc = (
+        f"• **Observation System:** `{obs_name}` ({obs_badge})\n"
+        f"  └ *{ 'Multi-vector sliding window telemetry with graduated trust for whitelists' if obs_mode == 'advanced' else 'Direct single-vector threshold gatekeeping with direct bypass' }*"
+    )
+
     desc = (
-        f"Choose the core defense posture for **{guild.name}**:\n\n"
-        f"• **Hard Zero-Tolerance (`hard`):** Strict real-time sanctions against unauthorized structural alterations.\n\n"
-        f"{mode_status}"
+        f"Configure the core defense posture and observation engine for **{guild.name}**:\n\n"
+        f"{mode_status}\n"
+        f"{obs_desc}\n\n"
+        f"**Available Defensive Modes:**\n"
+        f"• **Hard Zero-Tolerance (`hard`):** Immediate sanctions against unauthorized structural alterations.\n"
+        f"• **Ultimate Lockdown (`ultimate`):** Restrictive containment policy with aggressive privilege revocation.\n"
+        f"• **Hybrid Adaptive (`hybrid`):** Scaled intervention using observation engine telemetry."
+    )
+
+    toggle_obs_btn = (
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:toggle_obs:{guild.id}")
+        .set_label("Disable Observation" if obs_enabled else "Enable Observation")
+        .set_style(ButtonStyle.Danger if obs_enabled else ButtonStyle.Success)
+        .set_emoji(EMOJIS.get("shield", "🛡️"))
+    )
+
+    cycle_obs_btn = (
+        ButtonBuilder()
+        .set_custom_id(f"an_wiz:cycle_obs:{guild.id}")
+        .set_label(f"Switch Engine ({'Standard' if obs_mode == 'advanced' else 'Aegis'})")
+        .set_style(ButtonStyle.Secondary)
+        .set_emoji(EMOJIS.get("refresh", "🔄"))
     )
 
     action_row = (
@@ -234,11 +267,12 @@ async def build_wizard_step2_view(guild: discord.Guild) -> Any:
     return (
         ContainerBuilder()
         .set_accent_color(COLORS.get("info", "#0844C5"))
-        .add_text_display(f"### {EMOJIS.get('gear', '⚙️')} Setup Step 2/{TOTAL_STEPS}: Defensive Operating Mode")
+        .add_text_display(f"### {EMOJIS.get('gear', '⚙️')} Setup Step 2/{TOTAL_STEPS}: Defensive Mode & Observation")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_text_display(desc)
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_action_row(ActionRowBuilder().add_select_menu(mode_select))
+        .add_action_row(ActionRowBuilder().add_button(toggle_obs_btn).add_button(cycle_obs_btn))
         .add_action_row(action_row)
         .add_text_display(f"-# {settings.BOT_NAME} Security Wizard • Step 2 of {TOTAL_STEPS}")
         .build()
@@ -962,9 +996,17 @@ async def build_wizard_step11_view(guild: discord.Guild) -> Any:
     higher_roles = [r for r in guild.roles if r.position >= me.top_role.position and not r.is_default() and r != me.top_role]
     hierarchy_str = f"{EMOJIS.get('check', '✅')} Safe" if not higher_roles else f"{EMOJIS.get('warning', '⚠️')} {len(higher_roles)} higher role(s)"
 
+    obs_enabled = sess.get("observation_system_enabled", True)
+    obs_mode = sess.get("observation_mode", "advanced")
+    obs_name = "Aegis Advanced Correlation Engine" if obs_mode == "advanced" else "Standard Heuristic Engine"
+    obs_status_badge = f"{EMOJIS.get('check', '✅')} Active" if obs_enabled else f"{EMOJIS.get('cross', '❌')} Disabled"
+    wl_model = "Graduated Trust & Forensic Telemetry" if obs_mode == "advanced" else "Direct Threshold Bypass"
+
     summary_text = (
         f"**Final Security Configuration Review:**\n\n"
         f"• **Operating Mode:** `{AntiNukeManager.get_mode_display_name(mode)}`\n"
+        f"• **Observation System:** `{obs_name}` ({obs_status_badge})\n"
+        f"• **Whitelist Protocol:** `{wl_model}`\n"
         f"• **Monitored Vectors:** `{len(monitored)} / {len(AntiNukeConstants.USER_CONFIGURABLE_EVENTS)}` events\n"
         f"• **Role Hierarchy Check:** {hierarchy_str}\n"
         f"• **Warning Channel:** {warn_str}\n"
@@ -1072,6 +1114,8 @@ async def execute(ctx: Any, command_type: str, message: Any, args: List[str]):
         "guild_id": gid,
         "mode": cur_mode,
         "mode_confirmed": False,
+        "observation_system_enabled": cfg.get("observation_system_enabled", True),
+        "observation_mode": cfg.get("observation_mode", "advanced"),
         "monitored_events": list(cfg.get("monitored_events", AntiNukeConstants.USER_CONFIGURABLE_EVENTS)),
         "events_confirmed": False,
         "thresholds": dict(cfg.get("thresholds") or get_default_thresholds(cur_mode)),

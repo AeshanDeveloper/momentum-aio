@@ -80,7 +80,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
         # ----------------------------------------------------------------------
         # Anti-Nuke Authority Enforcement
         # ----------------------------------------------------------------------
-        if custom_id.startswith(("an:", "an_wiz:", "an_wl:", "an_pn:", "an_th:", "an_perm:", "an_eo:")):
+        if custom_id.startswith(("an:", "an_wiz:", "an_wl:", "an_pn:", "an_th:", "an_perm:", "an_eo:", "sec:")):
             if not guild:
                 return
 
@@ -185,6 +185,20 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 if AntiNukeConstants.is_mode_enabled(chosen_mode):
                     sess["mode"] = chosen_mode
                     sess["mode_confirmed"] = True
+                view = await build_wizard_step2_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif sub_action == "toggle_obs":
+                cur_obs = sess.get("observation_system_enabled", True)
+                sess["observation_system_enabled"] = not cur_obs
+                view = await build_wizard_step2_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=view)
+
+            elif sub_action == "cycle_obs":
+                cur_obs_mode = sess.get("observation_mode", "advanced")
+                sess["observation_mode"] = "standard" if cur_obs_mode == "advanced" else "advanced"
                 view = await build_wizard_step2_view(guild)
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=view)
@@ -393,6 +407,8 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     "setup_completed": True,
                     "enabled": True,
                     "mode": mode,
+                    "observation_system_enabled": sess.get("observation_system_enabled", True),
+                    "observation_mode": sess.get("observation_mode", "advanced"),
                     "monitored_events": monitored,
                     "thresholds": thresholds,
                     "punishments": punishments,
@@ -493,6 +509,29 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 cfg = AntiNukeManager.get_guild_config(str(guild.id))
                 new_state = not cfg.get("enabled", False)
                 await AntiNukeManager.save_guild_config(str(guild.id), {"enabled": new_state})
+                new_view = await build_dashboard_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=new_view)
+
+            # Observation System Toggle
+            elif action == "toggle_obs":
+                cur_obs = AntiNukeManager.is_observation_system_enabled(guild.id)
+                await AntiNukeManager.set_observation_system(guild.id, enabled=not cur_obs)
+                new_view = await build_dashboard_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=new_view)
+
+            # Defensive Operating Mode Cycler
+            elif action == "cycle_mode":
+                cfg = AntiNukeManager.get_guild_config(str(guild.id))
+                cur_mode = cfg.get("mode", AntiNukeConstants.MODE_HARD)
+                cycle_map = {
+                    AntiNukeConstants.MODE_HARD: AntiNukeConstants.MODE_ULTIMATE,
+                    AntiNukeConstants.MODE_ULTIMATE: AntiNukeConstants.MODE_HYBRID,
+                    AntiNukeConstants.MODE_HYBRID: AntiNukeConstants.MODE_HARD,
+                }
+                next_mode = cycle_map.get(cur_mode, AntiNukeConstants.MODE_HARD)
+                await AntiNukeManager.save_guild_config(str(guild.id), {"mode": next_mode})
                 new_view = await build_dashboard_view(guild)
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=new_view)
@@ -1658,6 +1697,153 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 incident_id=inc_id,
                 recipient_id=rec_id,
             )
+            return
+
+        # ----------------------------------------------------------------------
+        # 16. Sentinel Lockdown & Emergency Controls (lck:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("lck:"):
+            from plugins.MomentumOneToolkit.commands.security.lockdown import (
+                _handle_status,
+                _handle_trigger,
+                _handle_recover,
+                _handle_posture,
+                _handle_journal,
+                _handle_policy,
+                _handle_review,
+            )
+            from core.security.protection_service import security_protection_service
+            from core.security.antinuke import AntiNukeManager
+
+            parts = custom_id.split(":")
+            act = parts[1] if len(parts) > 1 else "status"
+            gid = parts[2] if len(parts) > 2 else str(guild.id if guild else "")
+
+            policy = security_protection_service.get_policy(gid)
+            is_auth = (
+                policy.is_trusted_recovery_actor(interaction.user.id)
+                or (guild and guild.owner_id and str(guild.owner_id) == str(interaction.user.id))
+                or (guild and AntiNukeManager.is_owner_or_extra_owner(guild, interaction.user.id))
+            )
+            if not is_auth:
+                await send_ui(interaction, "permissions.owner_only", ephemeral=True, style="error")
+                return
+
+            if act == "posture":
+                await _handle_posture(interaction, guild, policy)
+            elif act == "prompt_trigger":
+                await _handle_trigger(interaction, guild, interaction.user, "Emergency containment initiated via interactive button", force=False)
+            elif act == "confirm_trigger":
+                await _handle_trigger(interaction, guild, interaction.user, "Emergency containment confirmed via interactive button", force=True)
+            elif act == "cancel_trigger":
+                box = (
+                    ContainerBuilder()
+                    .set_accent_color(COLORS.get("info", "#0844C5"))
+                    .add_text_display(f"### {EMOJIS.get('check', '✅')} Lockdown Cancelled")
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_text_display("Emergency containment was cancelled. Normal server permissions and monitoring remain in effect.")
+                    .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+                    .add_text_display(f"-# {settings.BOT_NAME} Security Governance")
+                    .build()
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=box)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=box, ephemeral=True)
+            elif act == "do_recover":
+                await _handle_recover(interaction, guild, interaction.user, policy)
+            elif act == "journal":
+                await _handle_journal(interaction, guild)
+            elif act == "review":
+                await _handle_review(interaction, guild, policy)
+            elif act == "policy":
+                await _handle_policy(interaction, guild, policy, [])
+            else:
+                await _handle_status(interaction, guild, policy)
+            return
+
+        # ----------------------------------------------------------------------
+        # 17. Security Suite Master Command Interactions (sec:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("sec:"):
+            from plugins.MomentumOneToolkit.commands.security.security import build_security_hub_view
+            from plugins.MomentumOneToolkit.commands.security.antinuke import build_dashboard_view
+            from plugins.MomentumOneToolkit.commands.security.lockdown import _handle_status, _handle_posture, _handle_trigger
+            from plugins.MomentumOneToolkit.commands.security.explain import build_explain_container
+            from core.security.antinuke import AntiNukeManager, AntiNukeConstants
+            from core.security.protection_service import security_protection_service
+
+            parts = custom_id.split(":")
+            action = parts[1] if len(parts) > 1 else "hub"
+            gid = parts[2] if len(parts) > 2 else str(guild.id if guild else "")
+
+            if action in ["hub", "refresh"]:
+                v = await build_security_hub_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
+
+            elif action == "nav":
+                target = values[0] if values else "dashboard"
+                if target == "antinuke":
+                    v = await build_dashboard_view(guild)
+                elif target == "lockdown":
+                    policy = security_protection_service.get_policy(str(guild.id))
+                    await _handle_status(interaction, guild, policy)
+                    return
+                elif target == "posture":
+                    policy = security_protection_service.get_policy(str(guild.id))
+                    await _handle_posture(interaction, guild, policy)
+                    return
+                elif target == "thresholds":
+                    from plugins.MomentumOneToolkit.commands.security.thresholds import build_thresholds_dashboard_view
+                    v = await build_thresholds_dashboard_view(guild, user_id=interaction.user.id)
+                elif target == "punishments":
+                    from plugins.MomentumOneToolkit.commands.security.punishment import build_punishment_panel_view
+                    v = await build_punishment_panel_view(guild)
+                elif target == "whitelist":
+                    from plugins.MomentumOneToolkit.commands.security.whitelist import build_whitelist_dashboard_view
+                    v = await build_whitelist_dashboard_view(guild)
+                elif target == "explain":
+                    v = build_explain_container()
+                else:
+                    v = await build_security_hub_view(guild)
+
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
+
+            elif action == "posture":
+                policy = security_protection_service.get_policy(str(guild.id))
+                await _handle_posture(interaction, guild, policy)
+
+            elif action == "toggle_obs":
+                cur_obs = AntiNukeManager.is_observation_system_enabled(guild.id)
+                await AntiNukeManager.set_observation_system(guild.id, enabled=not cur_obs)
+                v = await build_security_hub_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
+
+            elif action == "containment":
+                await _handle_trigger(interaction, guild, interaction.user, "Emergency lockdown requested from Security Suite", force=False)
+
+            elif action == "explain":
+                v = build_explain_container()
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
+            return
+
+        # ----------------------------------------------------------------------
+        # 18. Security Explanations & Glossary (sec_exp:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("sec_exp:"):
+            from plugins.MomentumOneToolkit.commands.security.explain import build_explain_container
+            parts = custom_id.split(":")
+            action = parts[1] if len(parts) > 1 else "select"
+
+            if action == "select":
+                chosen_term = values[0] if values else "antinuke"
+                v = build_explain_container(selected_key=chosen_term)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
             return
 
     except Exception as err:

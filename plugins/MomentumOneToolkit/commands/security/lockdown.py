@@ -158,24 +158,53 @@ async def _handle_status(message: Any, guild: Any, policy: SecurityResponsePolic
         )
         color = COLORS.get("danger", "#ED4245") if active_lck.status != LockdownStatus.PARTIAL else COLORS.get("warning", "#F59E0B")
 
-    row = (
-        ActionRowBuilder()
-        .add_button(
-            ButtonBuilder()
-            .set_custom_id(f"lck:posture:{gid}")
-            .set_label("Audit Security Posture")
-            .set_style(ButtonStyle.Primary)
-            .set_emoji(EMOJIS.get("shield", "🛡️"))
-        )
+    action_row_top = ActionRowBuilder()
+    action_row_top.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"lck:posture:{gid}")
+        .set_label("Audit Posture")
+        .set_style(ButtonStyle.Primary)
+        .set_emoji(EMOJIS.get("shield", "🛡️"))
     )
     if active_lck:
-        row.add_button(
+        action_row_top.add_button(
             ButtonBuilder()
-            .set_custom_id(f"sentinel:action:begin_recovery:{active_lck.incident_id}")
+            .set_custom_id(f"lck:do_recover:{gid}")
             .set_label("Begin Recovery")
             .set_style(ButtonStyle.Success)
             .set_emoji(EMOJIS.get("unlock", "🔓"))
         )
+    else:
+        action_row_top.add_button(
+            ButtonBuilder()
+            .set_custom_id(f"lck:prompt_trigger:{gid}")
+            .set_label("Trigger Containment")
+            .set_style(ButtonStyle.Danger)
+            .set_emoji(EMOJIS.get("lock", "🔒"))
+        )
+
+    action_row_bottom = ActionRowBuilder()
+    action_row_bottom.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"lck:journal:{gid}")
+        .set_label("Permission Journal")
+        .set_style(ButtonStyle.Secondary)
+        .set_emoji(EMOJIS.get("info", "📋"))
+    )
+    action_row_bottom.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"lck:review:{gid}")
+        .set_label("Consensus Review")
+        .set_style(ButtonStyle.Secondary)
+        .set_emoji(EMOJIS.get("balance", "⚖️"))
+    )
+    action_row_bottom.add_button(
+        ButtonBuilder()
+        .set_custom_id(f"lck:policy:{gid}")
+        .set_label("Policy Settings")
+        .set_style(ButtonStyle.Secondary)
+        .set_emoji(EMOJIS.get("gear", "⚙️"))
+    )
 
     box = (
         ContainerBuilder()
@@ -184,15 +213,99 @@ async def _handle_status(message: Any, guild: Any, policy: SecurityResponsePolic
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
         .add_text_display(f"{status_line}\n\n{desc}")
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_action_row(row)
+        .add_action_row(action_row_top)
+        .add_action_row(action_row_bottom)
         .add_text_display(f"-# {settings.BOT_NAME} Reversible Emergency Infrastructure")
         .build()
     )
     return await send_response(message, box)
 
 
-async def _handle_trigger(message: Any, guild: Any, author: Any, reason: str):
-    """Manually triggers emergency containment."""
+async def _handle_trigger(message: Any, guild: Any, author: Any, reason: str, force: bool = False):
+    """Manually triggers emergency containment with safeguards and confirmation."""
+    gid = str(guild.id)
+
+    # Safeguard: Do not create two backups for a server
+    active_lck = lockdown_journal_manager.get_active_lockdown_for_guild(gid)
+    if active_lck and active_lck.status in (LockdownStatus.ACTIVE, LockdownStatus.PARTIAL):
+        box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("warning", "#F59E0B"))
+            .add_text_display(f"### {EMOJIS.get('warning', '⚠️')} Active Containment Exists")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"**Duplicate Backup Prevented**: Guild `{guild.name}` already has an active emergency lockdown "
+                f"(`{active_lck.lockdown_id}`).\n\n"
+                f"Sentinel safeguards server state and will not create a second conflicting backup.\n\n"
+                f"• **Status:** `{active_lck.status.upper()}`\n"
+                f"• **Trigger Pattern:** `{active_lck.trigger_pattern or 'Manual Containment'}`\n"
+                f"• **Checksum:** `{active_lck.checksum[:16]}...`\n\n"
+                f"To lift containment or recover permissions, click **Begin Recovery** below or run:\n"
+                f"`{settings.BOT_PREFIX}lockdown recover {active_lck.lockdown_id}`"
+            )
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_action_row(
+                ActionRowBuilder()
+                .add_button(
+                    ButtonBuilder()
+                    .set_custom_id(f"lck:do_recover:{gid}")
+                    .set_label("Begin Recovery")
+                    .set_style(ButtonStyle.Success)
+                    .set_emoji(EMOJIS.get("unlock", "🔓"))
+                )
+                .add_button(
+                    ButtonBuilder()
+                    .set_custom_id(f"lck:posture:{gid}")
+                    .set_label("Audit Posture")
+                    .set_style(ButtonStyle.Secondary)
+                    .set_emoji(EMOJIS.get("shield", "🛡️"))
+                )
+            )
+            .build()
+        )
+        return await send_response(message, box)
+
+    # Confirmation safeguard if not forced
+    if not force:
+        box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("danger", "#ED4245"))
+            .add_text_display(f"### 🚨 Confirmation: Emergency Containment")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"You are about to initiate an **Emergency Server Lockdown** for **{guild.name}**.\n\n"
+                f"**Protective Safeguards Enforced:**\n"
+                f"• Strips dangerous administrative permissions from non-whitelisted roles.\n"
+                f"• Locks channels to contain active threats or permission tampering.\n"
+                f"• Creates a single cryptographic SHA-256 permission backup.\n"
+                f"• Protects Sentinel and recovery staff roles.\n\n"
+                f"**Reason:** *{reason}*\n"
+                f"**Initiator:** <@{author.id}>\n\n"
+                f"⚠️ *Click Confirm below to proceed with emergency containment.*"
+            )
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_action_row(
+                ActionRowBuilder()
+                .add_button(
+                    ButtonBuilder()
+                    .set_custom_id(f"lck:confirm_trigger:{gid}")
+                    .set_label("Confirm Emergency Lockdown")
+                    .set_style(ButtonStyle.Danger)
+                    .set_emoji(EMOJIS.get("shield", "🛡️"))
+                )
+                .add_button(
+                    ButtonBuilder()
+                    .set_custom_id(f"lck:cancel_trigger:{gid}")
+                    .set_label("Cancel")
+                    .set_style(ButtonStyle.Secondary)
+                    .set_emoji(EMOJIS.get("cross", "❌"))
+                )
+            )
+            .add_text_display(f"-# {settings.BOT_NAME} Security Governance • Safeguards Active")
+            .build()
+        )
+        return await send_response(message, box)
+
     rec = await security_protection_service.manual_lockdown(
         guild=guild,
         admin_id=author.id,
@@ -215,6 +328,23 @@ async def _handle_trigger(message: Any, guild: Any, author: Any, reason: str):
             f"To restore permissions, run: `{settings.BOT_PREFIX}lockdown recover {rec.lockdown_id}`"
         )
         .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+        .add_action_row(
+            ActionRowBuilder()
+            .add_button(
+                ButtonBuilder()
+                .set_custom_id(f"lck:do_recover:{gid}")
+                .set_label("Begin Recovery")
+                .set_style(ButtonStyle.Success)
+                .set_emoji(EMOJIS.get("unlock", "🔓"))
+            )
+            .add_button(
+                ButtonBuilder()
+                .set_custom_id(f"lck:journal:{gid}")
+                .set_label("Inspect Journal")
+                .set_style(ButtonStyle.Secondary)
+                .set_emoji(EMOJIS.get("info", "📋"))
+            )
+        )
         .add_text_display(f"-# {settings.BOT_NAME} Reversible Protection")
         .build()
     )

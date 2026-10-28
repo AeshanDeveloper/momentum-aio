@@ -268,14 +268,63 @@ class DatabaseManager:
             return self._mongo_db[name]
         return MockCollection(name, self._memory_store)
 
-    async def find_one(self, col_name: str, filter_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def find_one(self, col_name: str, filter_dict: Dict[str, Any]) -> Any:
         col = self.collection(col_name)
         if hasattr(col, "find_one"):
-            return await col.find_one(filter_dict)
+            return col.find_one(filter_dict)
         return None
 
-    async def insert_one(self, col_name: str, doc: Dict[str, Any]) -> Any:
+    def insert_one(self, col_name: str, doc: Dict[str, Any]) -> Any:
         col = self.collection(col_name)
-        return await col.insert_one(doc)
+        return col.insert_one(doc)
+
+    def update_one(self, col_name: str, filter_dict: Dict[str, Any], update: Dict[str, Any], upsert: bool = False) -> Any:
+        col = self.collection(col_name)
+        if hasattr(col, "update_one"):
+            res = col.update_one(filter_dict, update, upsert=upsert)
+            # If called synchronously in a non-awaited context and loop is running, schedule background task
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running() and asyncio.iscoroutine(res):
+                    return loop.create_task(res)
+            except RuntimeError:
+                pass
+            return res
+        return None
+
+    def delete_one(self, col_name: str, filter_dict: Dict[str, Any]) -> Any:
+        col = self.collection(col_name)
+        if hasattr(col, "delete_one"):
+            res = col.delete_one(filter_dict)
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running() and asyncio.iscoroutine(res):
+                    return loop.create_task(res)
+            except RuntimeError:
+                pass
+            return res
+        return None
+
+    def delete_many(self, col_name: str, filter_dict: Dict[str, Any]) -> Any:
+        col = self.collection(col_name)
+        if hasattr(col, "delete_many"):
+            res = col.delete_many(filter_dict)
+            try:
+                loop = asyncio.get_running_loop()
+                if loop.is_running() and asyncio.iscoroutine(res):
+                    return loop.create_task(res)
+            except RuntimeError:
+                pass
+            return res
+        return None
+
+    def find(self, col_name: str, filter_dict: Optional[Dict[str, Any]] = None, **kwargs) -> Any:
+        col = self.collection(col_name)
+        return col.find(filter_dict or {}, **kwargs)
+
+    def count_documents(self, col_name: str, filter_dict: Optional[Dict[str, Any]] = None) -> Any:
+        col = self.collection(col_name)
+        return col.count_documents(filter_dict or {})
 
 database = DatabaseManager()
+
