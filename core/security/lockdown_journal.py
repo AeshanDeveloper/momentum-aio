@@ -241,6 +241,13 @@ class LockdownRecord:
             ),
         }
 
+    @property
+    def summary_metrics(self) -> Dict[str, Any]:
+        """Provides direct access to summary counters dictionary."""
+        if not self.summary:
+            self.update_summary()
+        return self.summary
+
     def to_dict(self) -> Dict[str, Any]:
         self.update_summary()
         return {

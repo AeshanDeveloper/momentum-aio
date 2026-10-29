@@ -837,7 +837,7 @@ class EmergencyLockdownManager:
             
             if held_dangerous:
                 can_mod, mod_reason = self.can_modify_role(bot_member, r)
-                is_crit = ("administrator" in held_perms or "manage_roles" in held_perms) and not can_mod
+                is_crit = ("administrator" in held_dangerous or "manage_roles" in held_dangerous) and not can_mod
                 sev = "CRITICAL" if is_crit else ("HIGH" if not can_mod else "MEDIUM")
                 dangerous_roles_breakdown.append({
                     "role_id": str(r.id),

@@ -292,13 +292,14 @@ class SecurityProtectionService:
 
         # Fallback search channels by name
         if not target_channel and hasattr(guild, "text_channels"):
-            for ch in guild.text_channels:
-                ch_name = getattr(ch, "name", "").lower()
-                if "security-log" in ch_name or "forensic" in ch_name or "mod-log" in ch_name or "audit-log" in ch_name:
-                    target_channel = ch
-                    break
-                except Exception:
-                    pass
+            try:
+                for ch in guild.text_channels:
+                    ch_name = getattr(ch, "name", "").lower()
+                    if "security-log" in ch_name or "forensic" in ch_name or "mod-log" in ch_name or "audit-log" in ch_name:
+                        target_channel = ch
+                        break
+            except Exception:
+                pass
 
         is_shadow = getattr(lockdown_record, "is_shadow_mode", False) if lockdown_record else getattr(incident, "is_shadow_mode", False)
         mode_label = "SHADOW (Simulation)" if is_shadow else "LIVE ENFORCEMENT"

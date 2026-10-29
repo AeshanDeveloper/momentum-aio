@@ -1728,8 +1728,20 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 await send_ui(interaction, "permissions.owner_only", ephemeral=True, style="error")
                 return
 
-            if act == "posture":
-                await _handle_posture(interaction, guild, policy)
+            if act in ("posture", "posture_refresh"):
+                from plugins.MomentumOneToolkit.commands.security.lockdown import build_posture_view
+                box = build_posture_view(guild, policy)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=box)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=box, ephemeral=True)
+            elif act == "posture_dangerous":
+                from plugins.MomentumOneToolkit.commands.security.lockdown import build_dangerous_permissions_view
+                box = build_dangerous_permissions_view(guild, policy)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=box)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=box, ephemeral=True)
             elif act == "prompt_trigger":
                 await _handle_trigger(interaction, guild, interaction.user, "Emergency containment initiated via interactive button", force=False)
             elif act == "confirm_trigger":
@@ -1759,6 +1771,39 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 await _handle_policy(interaction, guild, policy, [])
             else:
                 await _handle_status(interaction, guild, policy)
+            return
+
+        # ----------------------------------------------------------------------
+        # 16b. Security Setup Wizard Interactions (sec_wiz:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("sec_wiz:"):
+            from plugins.MomentumOneToolkit.commands.security.setup import (
+                build_unified_setup_view,
+                build_wizard_step1_view,
+                execute_quick_setup,
+            )
+            parts = custom_id.split(":")
+            action = parts[1] if len(parts) > 1 else "menu"
+            gid = parts[2] if len(parts) > 2 else str(guild.id if guild else "")
+
+            if action in ["quick", "quick_confirm"]:
+                v = await execute_quick_setup(guild, interaction.user.id)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=v, ephemeral=True)
+            elif action == "advanced":
+                v = await build_wizard_step1_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=v, ephemeral=True)
+            elif action in ["menu", "overview"]:
+                v = build_unified_setup_view(guild)
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=v)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=v, ephemeral=True)
             return
 
         # ----------------------------------------------------------------------

@@ -15,6 +15,21 @@ from apps.bot.discord.commands.registry import commands_registry
 from sdk.discord import send_ui, send_response
 from shared.types.command_record import CommandType, CommandStatus
 
+def _extract_slash_args(opts_list):
+    """Recursively parse slash options into args (supporting subcommands and parameters)."""
+    out = []
+    for opt in (opts_list or []):
+        # Type 1 = SUB_COMMAND, Type 2 = SUB_COMMAND_GROUP
+        if opt.get("type") in (1, 2) or ("value" not in opt and "options" in opt):
+            out.append(str(opt.get("name", "")))
+            out.extend(_extract_slash_args(opt.get("options", [])))
+        elif "value" in opt:
+            out.append(str(opt.get("value", "")))
+        elif "name" in opt and opt.get("type") is not None:
+            out.append(str(opt.get("name", "")))
+    return [x for x in out if x]
+
+
 name = "interactionCreate"
 description = "Official interaction & slash command dispatcher"
 
@@ -94,19 +109,6 @@ async def execute(ctx: Any, interaction: discord.Interaction):
 
         CooldownManager.apply(cmd, user_id, guild_id)
 
-        # Recursively parse slash options into args (supporting subcommands and parameters)
-        def _extract_slash_args(opts_list):
-            out = []
-            for opt in (opts_list or []):
-                # Type 1 = SUB_COMMAND, Type 2 = SUB_COMMAND_GROUP
-                if opt.get("type") in (1, 2) or ("value" not in opt and "options" in opt):
-                    out.append(str(opt.get("name", "")))
-                    out.extend(_extract_slash_args(opt.get("options", [])))
-                elif "value" in opt:
-                    out.append(str(opt.get("value", "")))
-                elif "name" in opt and opt.get("type") is not None:
-                    out.append(str(opt.get("name", "")))
-            return [x for x in out if x]
 
         options = interaction.data.get("options", [])
         args = _extract_slash_args(options)

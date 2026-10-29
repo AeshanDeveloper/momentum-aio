@@ -758,17 +758,40 @@ class Channel(BaseItem):
         return wh
 
 class TextChannel(Channel):
-    def __init__(self, id: int = 0, name: str = ""):
+    def __init__(self, id: int = 0, name: str = "", *args, **kwargs):
         super().__init__(id, name, ChannelType.text)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 class VoiceChannel(Channel):
-    def __init__(self, id: int = 0, name: str = ""):
+    def __init__(self, id: int = 0, name: str = "", *args, **kwargs):
         super().__init__(id, name, ChannelType.voice)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 class CategoryChannel(Channel):
-    def __init__(self, id: int = 0, name: str = ""):
+    def __init__(self, id: int = 0, name: str = "", *args, **kwargs):
         super().__init__(id, name, ChannelType.category)
-        self.channels: List[Any] = []
+        self._channels: List[Any] = []
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    @property
+    def channels(self) -> List[Any]:
+        if self._channels:
+            return self._channels
+        if self.guild and hasattr(self.guild, "channels"):
+            return [
+                c for c in self.guild.channels
+                if getattr(c, "category", None) == self
+                or getattr(c, "category_id", None) == self.id
+                or getattr(c, "parent_id", None) == self.id
+            ]
+        return []
+
+    @channels.setter
+    def channels(self, val: List[Any]) -> None:
+        self._channels = list(val)
 
     @property
     def text_channels(self) -> List[Any]:
@@ -779,12 +802,16 @@ class CategoryChannel(Channel):
         return [c for c in self.channels if getattr(c, "type", None) == ChannelType.voice or isinstance(c, VoiceChannel)]
 
 class StageChannel(Channel):
-    def __init__(self, id: int = 0, name: str = ""):
+    def __init__(self, id: int = 0, name: str = "", *args, **kwargs):
         super().__init__(id, name, ChannelType.stage_voice)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 class Thread(Channel):
-    def __init__(self, id: int = 0, name: str = ""):
+    def __init__(self, id: int = 0, name: str = "", *args, **kwargs):
         super().__init__(id, name, ChannelType.public_thread)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 class abc:
     class GuildChannel(Channel): pass
