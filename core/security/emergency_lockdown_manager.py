@@ -490,6 +490,7 @@ class EmergencyLockdownManager:
                         permissions=new_permissions_obj,
                         reason=f"Sentinel Emergency Lockdown: Contained incident {record.incident_id}",
                     )
+                    role.permissions = new_permissions_obj
                     entry.status = JournalEntryStatus.VERIFIED
                 except Exception as err:
                     entry.status = JournalEntryStatus.FAILED_API
@@ -567,6 +568,8 @@ class EmergencyLockdownManager:
                             overwrites=cur_ows,
                             reason=f"Sentinel Emergency Lockdown: Channel restricted for {record.incident_id}",
                         )
+                    if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
+                        ch.overwrites[default_role] = new_ow
                     entry.status = JournalEntryStatus.VERIFIED
                 except Exception as err:
                     entry.status = JournalEntryStatus.FAILED_API
@@ -658,10 +661,14 @@ class EmergencyLockdownManager:
 
             # Update record status
             record.update_summary()
-            if conflict_count > 0 and restored_count == 0:
-                record.status = LockdownStatus.OVERRIDDEN_BY_ADMIN
-            elif failed_count > 0:
+            total_restored = len([e for e in record.entries if e.status == JournalEntryStatus.RESTORED])
+            total_failed = len([e for e in record.entries if e.status == JournalEntryStatus.FAILED_RESTORE])
+            total_conflict = len([e for e in record.entries if e.status == JournalEntryStatus.CONFLICT_DETECTED])
+
+            if total_failed > 0:
                 record.status = LockdownStatus.PARTIAL
+            elif total_conflict > 0 and total_restored == 0:
+                record.status = LockdownStatus.OVERRIDDEN_BY_ADMIN
             else:
                 record.status = LockdownStatus.RESTORED
 
@@ -737,6 +744,7 @@ class EmergencyLockdownManager:
                 permissions=new_permissions_obj,
                 reason=f"Sentinel Recovery: Restored baseline permissions for lockdown {entry.lockdown_id}",
             )
+            role.permissions = new_permissions_obj
             return JournalEntryStatus.RESTORED, None
         except Exception as err:
             logger.error(f"[EmergencyLockdown] Failed to restore role {role.name}: {err}")
@@ -794,11 +802,18 @@ class EmergencyLockdownManager:
             if not had_ow_initially and current_ow is None:
                 has_conflict = False
             elif current_ow is not None:
-                for k, applied_v in entry.applied_state.items():
-                    cur_v = current_dict.get(k)
-                    if cur_v != applied_v:
-                        has_conflict = True
-                        break
+                matches_before = True
+                for k, before_v in entry.before_state.items():
+                    if k not in ("had_overwrite", "channel_type", "name"):
+                        if getattr(current_ow, k, None) != before_v:
+                            matches_before = False
+                            break
+                if not matches_before:
+                    for k, applied_v in entry.applied_state.items():
+                        cur_v = current_dict.get(k)
+                        if cur_v != applied_v:
+                            has_conflict = True
+                            break
             if has_conflict:
                 logger.warning(
                     f"[EmergencyLockdown] Conflict detected for channel overwrite on {getattr(ch, 'name', cid)}. Preserving admin changes."
@@ -831,8 +846,11 @@ class EmergencyLockdownManager:
                 if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
                     ch.overwrites.pop(target_obj, None)
             else:
-                # Channel originally had an overwrite: restore original settings
-                new_ow = current_ow or PermissionOverwrite()
+                # Channel originally had an overwrite: restore original settings into a fresh object
+                new_ow = PermissionOverwrite()
+                if current_ow:
+                    for k, v in getattr(current_ow, "__dict__", {}).items():
+                        setattr(new_ow, k, v)
                 for k, before_v in entry.before_state.items():
                     if k not in ("had_overwrite", "channel_type", "name"):
                         setattr(new_ow, k, before_v)

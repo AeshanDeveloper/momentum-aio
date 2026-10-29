@@ -285,6 +285,19 @@ class CorrelationRuleConfig:
     cooldown_seconds: float = 10.0
     custom_params: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def threshold_count(self) -> int:
+        if self.pattern_id == PatternID.REPEATED_CHANNEL_DELETIONS:
+            return self.guild_count_threshold
+        return self.actor_count_threshold
+
+    @threshold_count.setter
+    def threshold_count(self, val: int) -> None:
+        if self.pattern_id == PatternID.REPEATED_CHANNEL_DELETIONS:
+            self.guild_count_threshold = val
+        else:
+            self.actor_count_threshold = val
+
 
 class SecurityCorrelationEngine:
     """
@@ -341,6 +354,16 @@ class SecurityCorrelationEngine:
         # Activity manager subscription token
         self._am_subscriber_cb: Optional[Callable[[EmergencySignal], Any]] = None
 
+    @property
+    def _rules(self) -> Dict[str, CorrelationRuleConfig]:
+        """Provides backward-compatible direct access to rule configurations."""
+        return self._rule_configs
+
+    def ingest_event(self, event: SecurityEvent, current_time: Optional[float] = None) -> Optional[ThreatSignal]:
+        """Synchronous single-event ingestion helper returning the first triggered ThreatSignal, if any."""
+        signals = self.ingest_event_sync(event, current_time=current_time)
+        return signals[0] if signals else None
+
     @classmethod
     def get_instance(cls) -> "SecurityCorrelationEngine":
         """Singleton accessor."""
@@ -369,7 +392,7 @@ class SecurityCorrelationEngine:
                 description="Rapid burst of bans within a narrow interval indicating a mass ban raid.",
                 actor_count_threshold=5,
                 guild_count_threshold=10,
-                window_seconds=10.0,
+                window_seconds=60.0,
                 min_unique_targets=3,
                 severity=ThreatSeverity.CRITICAL,
                 recommended_response=ResponseCategory.EMERGENCY_LOCKDOWN,
@@ -399,7 +422,7 @@ class SecurityCorrelationEngine:
                 description="Multiple channels or categories deleted in rapid succession.",
                 actor_count_threshold=2,
                 guild_count_threshold=3,
-                window_seconds=15.0,
+                window_seconds=60.0,
                 min_unique_targets=2,
                 severity=ThreatSeverity.CRITICAL,
                 recommended_response=ResponseCategory.EMERGENCY_LOCKDOWN,

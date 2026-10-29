@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import time
 import uuid
+import asyncio
+import inspect
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Set, Union, Tuple
 
@@ -149,13 +151,26 @@ class RoleBackupManager:
             # Persist to database
             try:
                 col = database.collection(cls.COLLECTION_NAME)
+                if hasattr(col, "_get_items"):
+                    items = col._get_items()
+                    entry_dict = entry.to_dict()
+                    found = False
+                    for idx, doc in enumerate(items):
+                        if doc.get("guild_id") == gid and doc.get("snapshot_id") == snapshot_id and doc.get("role_id") == rid:
+                            items[idx] = entry_dict
+                            found = True
+                            break
+                    if not found:
+                        items.append(entry_dict)
+                    from database.database import _save_mock_data
+                    _save_mock_data(cls.COLLECTION_NAME, items)
+
                 if hasattr(col, "update_one"):
                     res = col.update_one(
                         {"guild_id": gid, "snapshot_id": snapshot_id, "role_id": rid},
                         {"$set": entry.to_dict()},
                         upsert=True,
                     )
-                    import inspect
                     if inspect.isawaitable(res):
                         try:
                             loop = asyncio.get_running_loop()

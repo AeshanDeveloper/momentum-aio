@@ -150,11 +150,33 @@ class UnifiedWebhookLogger:
         for eid in expired:
             cls._PROCESSED_AUDIT_LOG_IDS.pop(eid, None)
 
+        def _safe_ts(ent: Any) -> Optional[float]:
+            if not ent:
+                return None
+            ca = getattr(ent, "created_at", None)
+            if ca is not None:
+                if hasattr(ca, "timestamp") and callable(ca.timestamp):
+                    try:
+                        return float(ca.timestamp())
+                    except Exception:
+                        pass
+                elif isinstance(ca, (int, float)):
+                    return float(ca)
+            eid = getattr(ent, "id", None)
+            if eid is not None:
+                try:
+                    return ((int(eid) >> 22) + 1420070400000) / 1000.0
+                except Exception:
+                    pass
+            return None
+
         try:
             async for entry in guild.audit_logs(action=action, limit=5):
-                entry_age = now - entry.created_at.timestamp()
-                if entry_age > max_age_seconds:
-                    break
+                ent_ts = _safe_ts(entry)
+                if ent_ts is not None:
+                    entry_age = now - ent_ts
+                    if entry_age > max_age_seconds:
+                        break
                 if target_id is not None:
                     target_match = False
                     if entry.target and hasattr(entry.target, "id"):

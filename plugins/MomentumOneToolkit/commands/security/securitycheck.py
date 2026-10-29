@@ -40,7 +40,7 @@ from sdk.discord.response import send_response, send_ui
 from shared.types.command_record import CommandType
 
 name = "securitycheck"
-aliases = ["seccheck", "secstatus", "securitydiagnostics", "sentinelcheck"]
+aliases = ["seccheck", "secstatus", "securitydiagnostics", "sentinelcheck", "securityscan", "scan", "secscan"]
 description = "Sentinel™ comprehensive autonomous security health and pipeline diagnostics."
 category = "Security"
 usage = "securitycheck [full|quick]"

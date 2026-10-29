@@ -13,7 +13,7 @@ from core.logging.logger import logger
 # Import commands
 from .commands import ping, help, ai
 from .commands.general import botinfo, server, profile, bug, notifications, update, logging as logging_cmd
-from .commands.moderation import announce, channel, command_manage
+from .commands.moderation import announce, channel, command_manage, ban, kick, timeout, warn
 from .commands.security import (
     antinuke,
     setup as sec_setup,
@@ -74,6 +74,10 @@ class Plugin(BasePlugin):
             announce,
             channel,
             command_manage,
+            ban,
+            kick,
+            timeout,
+            warn,
             antinuke,
             sec_setup,
             security,

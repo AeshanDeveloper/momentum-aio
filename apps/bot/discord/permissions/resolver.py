@@ -203,7 +203,7 @@ def evaluate_role_manageability(bot_member: Any, role: Any) -> Tuple[bool, str, 
         return True, "manageable", "Default @everyone role permissions can be modified."
 
     # External integration / bot managed role
-    if getattr(role, "managed", False):
+    if getattr(role, "managed", False) is True:
         return False, "managed_role", f"Role '{role.name}' is managed by an external integration or application."
 
     bot_top_role = getattr(bot_member, "top_role", None)

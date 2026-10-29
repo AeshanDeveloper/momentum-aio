@@ -174,12 +174,32 @@ class SecurityProtectionService:
             self._policies[gid] = policy
 
         try:
-            database.update_one(
-                "security_response_policies",
-                {"guild_id": gid},
-                {"$set": policy.to_dict()},
-                upsert=True,
-            )
+            col = database.collection("security_response_policies")
+            if hasattr(col, "_get_items"):
+                items = col._get_items()
+                found = False
+                for idx, doc in enumerate(items):
+                    if doc.get("guild_id") == gid:
+                        items[idx] = policy.to_dict()
+                        found = True
+                        break
+                if not found:
+                    items.append(policy.to_dict())
+                from database.database import _save_mock_data
+                _save_mock_data("security_response_policies", items)
+            elif hasattr(col, "update_one"):
+                res = col.update_one(
+                    {"guild_id": gid},
+                    {"$set": policy.to_dict()},
+                    upsert=True,
+                )
+                if inspect.isawaitable(res):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        if loop.is_running():
+                            loop.create_task(res)
+                    except RuntimeError:
+                        pass
             logger.info(f"[ProtectionService] Saved policy for guild {gid} (Auto-lockdown: {policy.auto_lockdown_enabled})")
         except Exception as err:
             logger.error(f"[ProtectionService] Failed to persist policy for guild {gid}: {err}")

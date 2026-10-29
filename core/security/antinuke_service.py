@@ -15,6 +15,44 @@ class AntiNukeService:
     and applies instant enforcement across all 23 critical Discord event vectors.
     """
 
+    @staticmethod
+    def _extract_entry_timestamp(entry: Any) -> Optional[float]:
+        """Safely extracts UNIX timestamp from audit log entry without throwing NoneType exceptions."""
+        if not entry:
+            return None
+        created_at = getattr(entry, "created_at", None)
+        if created_at is not None:
+            if hasattr(created_at, "timestamp") and callable(created_at.timestamp):
+                try:
+                    return float(created_at.timestamp())
+                except Exception:
+                    pass
+            elif isinstance(created_at, (int, float)):
+                return float(created_at)
+        ts = getattr(entry, "timestamp", None)
+        if ts is not None:
+            if callable(ts):
+                try:
+                    return float(ts())
+                except Exception:
+                    pass
+            elif hasattr(ts, "timestamp") and callable(ts.timestamp):
+                try:
+                    return float(ts.timestamp())
+                except Exception:
+                    pass
+            elif isinstance(ts, (int, float)):
+                return float(ts)
+        # Snowflake fallback
+        eid = getattr(entry, "id", None)
+        if eid is not None:
+            try:
+                ms = (int(eid) >> 22) + 1420070400000
+                return ms / 1000.0
+            except Exception:
+                pass
+        return None
+
     @classmethod
     async def _fetch_audit_entry(
         cls,
@@ -26,14 +64,17 @@ class AntiNukeService:
         """Fetches the most recent audit log entry matching action and target within a time window."""
         if not guild or not getattr(guild, "me", None):
             return None
-        if not guild.me.guild_permissions.view_audit_log:
+        if not getattr(guild.me.guild_permissions, "view_audit_log", False) and not getattr(guild.me.guild_permissions, "administrator", False):
             return None
 
+        now = time.time()
         try:
             async for entry in guild.audit_logs(limit=4, action=action):
-                entry_age = time.time() - entry.created_at.timestamp()
-                if entry_age > max_age_seconds:
-                    continue
+                entry_ts = cls._extract_entry_timestamp(entry)
+                if entry_ts is not None:
+                    entry_age = now - entry_ts
+                    if entry_age > max_age_seconds:
+                        continue
                 if target_id is not None and entry.target and getattr(entry.target, "id", None) != target_id:
                     continue
                 return entry
@@ -53,6 +94,11 @@ class AntiNukeService:
         **kwargs: Any,
     ) -> None:
         """Dispatches normalized gateway events to Sentinel's unified observation pipeline."""
+        bot_id = getattr(getattr(guild, "me", None), "id", None)
+        if actor and bot_id and str(getattr(actor, "id", None)) == str(bot_id):
+            # Exclude bot's own actions from threat observation
+            return
+
         try:
             from core.security.pipeline import sentinel_pipeline
             sentinel_pipeline.process_gateway_event(

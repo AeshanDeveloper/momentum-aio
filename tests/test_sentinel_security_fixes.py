@@ -62,6 +62,18 @@ class TestSentinelSecurityFixes(unittest.IsolatedAsyncioTestCase):
         self.guild_id = 9988776655
         self.guild_id_str = str(self.guild_id)
 
+        # Clear mock DB and journal records for this guild to ensure test isolation
+        from database.database import database, _save_mock_data
+        col = database.collection("security_lockdowns")
+        kept = [x for x in col._get_items() if str(x.get("guild_id")) != self.guild_id_str]
+        col._store[col.name] = kept
+        _save_mock_data("security_lockdowns", kept)
+        from core.security.lockdown_journal import lockdown_journal_manager
+        lockdown_journal_manager._lockdowns = {
+            k: v for k, v in lockdown_journal_manager._lockdowns.items() if str(v.guild_id) != self.guild_id_str
+        }
+        lockdown_journal_manager._guild_lockdowns.pop(self.guild_id_str, None)
+
         # Build mock guild
         self.guild = MagicMock(spec=discord.Guild)
         self.guild.id = self.guild_id

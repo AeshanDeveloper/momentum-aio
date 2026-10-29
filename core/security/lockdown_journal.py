@@ -334,6 +334,20 @@ class LockdownJournalManager:
 
         try:
             col = database.collection("security_lockdowns")
+            if hasattr(col, "_get_items"):
+                items = col._get_items()
+                rec_dict = record.to_dict()
+                found = False
+                for idx, doc in enumerate(items):
+                    if doc.get("lockdown_id") == record.lockdown_id:
+                        items[idx] = rec_dict
+                        found = True
+                        break
+                if not found:
+                    items.append(rec_dict)
+                from database.database import _save_mock_data
+                _save_mock_data("security_lockdowns", items)
+
             if hasattr(col, "update_one"):
                 async def _persist_record_async():
                     try:
