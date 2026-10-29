@@ -545,6 +545,64 @@ class TestEmergencyLockdown(unittest.TestCase):
         manage_roles_check = next((f for f in audit["findings"] if f["check"] == "Bot Permission: manage_roles"), None)
         self.assertTrue(manage_roles_check["passed"])
 
+    def test_channel_permission_lockdown_without_name_error(self):
+        """12. Channel permissions during emergency lockdown set correctly without name error."""
+        guild = MockGuild(guild_id=54321, name="Channel Test Guild")
+        bot_member = Member(id=999, name="SentinelBot", guild=guild)
+        bot_member.guild_permissions = Permissions(administrator=True, manage_channels=True, manage_roles=True)
+        guild.me = bot_member
+
+        cat = discord.CategoryChannel(id=1, name="Text channels")
+        cat.guild = guild
+        tc = discord.TextChannel(id=2, name="general")
+        tc.guild = guild
+        vc = discord.VoiceChannel(id=3, name="Voice channels")
+        vc.guild = guild
+        guild.channels.extend([cat, tc, vc])
+
+        policy = SecurityResponsePolicy(
+            guild_id="54321",
+            recovery_owner_id="1000",
+            shadow_mode=False,
+            auto_lockdown_enabled=True,
+            channel_deny_permissions=["send_messages", "view_channel", "connect"],
+        )
+
+        incident = Incident(
+            guild_id="54321",
+            title="Channel Test Incident",
+            severity="critical",
+            confidence="high",
+            is_emergency=True,
+        )
+        assessment = AssessmentResult(
+            signal_id="sig_test_chan",
+            threat_score=90.0,
+            severity="critical",
+            confidence="high",
+            should_trigger_immediate_response=True,
+            recommended_action=ProtectiveActionType.EMERGENCY_LOCKDOWN,
+            is_shadow_mode=False,
+        )
+
+        record = asyncio.run(
+            self.manager.execute_emergency_lockdown(
+                guild=guild,
+                incident=incident,
+                assessment=assessment,
+                policy=policy,
+            )
+        )
+
+        self.assertIsNotNone(record)
+        # Verify default role overwrite was applied on all channels without NameError
+        chan_entries = [e for e in record.entries if e.target_type == "channel_overwrite"]
+        self.assertGreaterEqual(len(chan_entries), 3)
+        for e in chan_entries:
+            self.assertEqual(e.status, JournalEntryStatus.VERIFIED)
+            self.assertIsNone(e.error)
+
 
 if __name__ == "__main__":
     unittest.main()
+

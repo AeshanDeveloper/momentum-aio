@@ -141,6 +141,18 @@ class Colour:
 
 Color = Colour
 
+DANGEROUS_PERMISSION_FLAGS: Dict[str, int] = {
+    "administrator": 1 << 3,
+    "manage_guild": 1 << 5,
+    "manage_roles": 1 << 28,
+    "manage_channels": 1 << 4,
+    "manage_webhooks": 1 << 29,
+    "ban_members": 1 << 2,
+    "kick_members": 1 << 1,
+    "moderate_members": 1 << 40,
+    "mention_everyone": 1 << 17,
+}
+
 class Permissions:
     _FLAGS: Dict[str, int] = {
         "create_instant_invite": 1 << 0,
@@ -174,6 +186,16 @@ class Permissions:
         "manage_nicknames": 1 << 27,
         "manage_roles": 1 << 28,
         "manage_webhooks": 1 << 29,
+        "manage_emojis_and_stickers": 1 << 30,
+        "use_application_commands": 1 << 31,
+        "request_to_speak": 1 << 32,
+        "manage_events": 1 << 33,
+        "manage_threads": 1 << 34,
+        "create_public_threads": 1 << 35,
+        "create_private_threads": 1 << 36,
+        "use_external_stickers": 1 << 37,
+        "send_messages_in_threads": 1 << 38,
+        "use_embedded_activities": 1 << 39,
         "moderate_members": 1 << 40,
     }
 
@@ -2289,11 +2311,34 @@ class Client:
 
         allow_val = 0
         deny_val = 0
-        if isinstance(overwrite, PermissionOverwrite):
-            for k, v in getattr(overwrite, "__dict__", {}).items():
-                bit = DANGEROUS_PERMISSION_FLAGS.get(k, 0)
+        if hasattr(overwrite, "pair"):
+            try:
+                allow_perms, deny_perms = overwrite.pair()
+                allow_val = getattr(allow_perms, "value", 0)
+                deny_val = getattr(deny_perms, "value", 0)
+            except Exception:
+                pass
+        elif isinstance(overwrite, (PermissionOverwrite, dict)) or hasattr(overwrite, "__dict__"):
+            items = overwrite.items() if isinstance(overwrite, dict) else getattr(overwrite, "__dict__", {}).items()
+            for k, v in items:
+                bit = Permissions._FLAGS.get(k, 0)
                 if not bit:
-                    perm_bits = {"send_messages": 1 << 11, "read_messages": 1 << 10, "view_channel": 1 << 10, "connect": 1 << 20, "speak": 1 << 21}
+                    bit = DANGEROUS_PERMISSION_FLAGS.get(k, 0)
+                if not bit:
+                    perm_bits = {
+                        "send_messages_in_threads": 1 << 38,
+                        "create_public_threads": 1 << 35,
+                        "create_private_threads": 1 << 36,
+                        "manage_threads": 1 << 34,
+                        "send_messages": 1 << 11,
+                        "read_messages": 1 << 16,
+                        "view_channel": 1 << 10,
+                        "connect": 1 << 20,
+                        "speak": 1 << 21,
+                        "embed_links": 1 << 14,
+                        "attach_files": 1 << 15,
+                        "add_reactions": 1 << 6,
+                    }
                     bit = perm_bits.get(k, 0)
                 if v is True:
                     allow_val |= bit
