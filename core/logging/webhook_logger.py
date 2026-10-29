@@ -1,6 +1,7 @@
 import time
 import asyncio
 import re
+import uuid
 from typing import Dict, Any, List, Optional, Tuple, Union, Callable, Awaitable
 try:
     import aiohttp
@@ -12,6 +13,7 @@ from config.settings import settings, COLORS, EMOJIS
 from config.strings import get_string
 from core.logging.logger import logger
 from database.database import database
+from core.logging.resource_tracker import SentinelResourceTracker, SentinelResourceRecord
 
 _WEBHOOK_URL_REGEX = re.compile(r"https?://(?:[a-zA-Z0-9-]+\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+", re.IGNORECASE)
 _WEBHOOK_TOKEN_REGEX = re.compile(r"(/api/webhooks/\d+/)[A-Za-z0-9_-]+", re.IGNORECASE)
@@ -715,10 +717,11 @@ class UnifiedWebhookLogger:
         reused_category = False
         cat_label = category_name or f"{settings.BOT_NAME.upper()} LOGS"
 
+        setup_id = f"setup_{uuid.uuid4().hex[:8]}"
         if create_category:
-            # Check previously configured category ID
+            # Check previously configured category ID IF and ONLY IF verified in SentinelResourceTracker
             saved_cat_id = cfg.get("category_id")
-            if saved_cat_id:
+            if saved_cat_id and SentinelResourceTracker.is_resource_owned(guild.id, saved_cat_id):
                 for c in (guild.categories or []):
                     if str(getattr(c, "id", "")) == str(saved_cat_id):
                         target_cat = c
@@ -730,22 +733,10 @@ class UnifiedWebhookLogger:
                         target_cat = ch
                         reused_category = True
 
-            # If not found by ID, inspect guild categories by name or pattern
+            # If still not found by verified ownership ID, create a brand-new dedicated category
+            # Never scan categories by name or pattern!
             if not target_cat:
-                for c in (guild.categories or []):
-                    c_name_lower = getattr(c, "name", "").strip().lower()
-                    if (
-                        c_name_lower == cat_label.strip().lower()
-                        or c_name_lower in ("momentumone logs", "sentinel logs", "sentinel™ logs")
-                        or c_name_lower.endswith(" logs")
-                    ):
-                        target_cat = c
-                        reused_category = True
-                        break
-
-            # If still not found, create it safely
-            if not target_cat:
-                await report(f"Creating category `{cat_label}`…")
+                await report(f"Creating dedicated logging category `{cat_label}`…")
                 overwrites = {
                     guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
                     me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_webhooks=True),
@@ -754,26 +745,18 @@ class UnifiedWebhookLogger:
                     target_cat = await guild.create_category(
                         name=cat_label,
                         overwrites=overwrites,
-                        reason="MomentumOne Unified Webhook Logging Category Setup",
+                        reason="Sentinel Unified Webhook Logging Category Setup",
                     )
                     created_category = True
+                    await SentinelResourceTracker.record_resource_creation(
+                        guild_id=guild.id,
+                        resource_id=target_cat.id,
+                        resource_type="category",
+                        setup_id=setup_id,
+                        purpose="forensic_category",
+                        metadata={"name": cat_label},
+                    )
                     await asyncio.sleep(cls._OPERATION_DELAY)
-                except discord.RateLimited as rle:
-                    wait_sec = getattr(rle, "retry_after", 2.0)
-                    await report(f"Rate limited by Discord. Backing off for {wait_sec:.1f}s…")
-                    await asyncio.sleep(wait_sec + 0.5)
-                    # Verify if category was created before retrying
-                    for c in guild.categories:
-                        if c.name.strip().lower() == cat_label.strip().lower():
-                            target_cat = c
-                            break
-                    if not target_cat:
-                        target_cat = await guild.create_category(
-                            name=cat_label,
-                            overwrites=overwrites,
-                            reason="MomentumOne Unified Webhook Logging Category Setup",
-                        )
-                        created_category = True
                 except Exception as err:
                     return {
                         "success": False,
@@ -823,41 +806,29 @@ class UnifiedWebhookLogger:
         new_destinations = {}
         errors = []
 
-        # 3. Channel & Webhook Resolution with Reuse and Rate-Limiting
+        # 3. Channel & Webhook Resolution with Verified Ownership
         for ch_name, cats, topic in specs:
             target_ch: Optional[discord.TextChannel] = None
             is_reused_ch = False
 
-            # (A) Check existing destination record
-            for cat in cats:
-                d = existing_destinations.get(cat)
-                if d and isinstance(d, dict) and d.get("channel_id"):
-                    c_cand = guild.get_channel(int(d["channel_id"]))
-                    if isinstance(c_cand, discord.TextChannel) and c_cand.name == ch_name:
-                        target_ch = c_cand
-                        is_reused_ch = True
-                        break
+            # Check if we already have a verified Sentinel-owned channel for this purpose under target_cat
+            if target_cat:
+                for rec in SentinelResourceTracker.get_all_owned_resources(guild.id):
+                    if (
+                        rec.resource_type == "text_channel"
+                        and rec.parent_id == str(target_cat.id)
+                        and rec.purpose == ch_name
+                    ):
+                        cand = guild.get_channel(int(rec.resource_id))
+                        if isinstance(cand, discord.TextChannel):
+                            target_ch = cand
+                            is_reused_ch = True
+                            break
 
-            # (B) Check target category's existing channels
-            if not target_ch and target_cat:
-                for c_cand in target_cat.text_channels:
-                    if c_cand.name.lower() == ch_name.lower():
-                        target_ch = c_cand
-                        is_reused_ch = True
-                        break
-
-            # (C) Check guild text channels if not bound to a category
-            if not target_ch and not target_cat:
-                for c_cand in guild.text_channels:
-                    if c_cand.name.lower() == ch_name.lower():
-                        target_ch = c_cand
-                        is_reused_ch = True
-                        break
-
-            # If channel doesn't exist, create it with rate-limit protection
+            # If not already verified and owned by Sentinel, create a new dedicated channel under target_cat
+            # NEVER search guild text channels by name or adopt user channels!
             if not target_ch:
                 await report(f"Creating channel `#{ch_name}`…")
-                # Conservative delay to prevent burst rate limits
                 await asyncio.sleep(cls._OPERATION_DELAY)
                 overwrites = {
                     guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
@@ -869,27 +840,18 @@ class UnifiedWebhookLogger:
                         category=target_cat,
                         topic=topic or f"{settings.BOT_NAME} Unified Audit & Event Logging",
                         overwrites=overwrites,
-                        reason="MomentumOne Unified Webhook Logging System Setup",
+                        reason="Sentinel Unified Webhook Logging System Setup",
                     )
                     created_channels.append(target_ch)
-                except discord.RateLimited as rle:
-                    wait_sec = getattr(rle, "retry_after", 2.5)
-                    await report(f"Rate limit encountered. Waiting {wait_sec:.1f}s…")
-                    await asyncio.sleep(wait_sec + 0.5)
-                    # Verify if channel was actually created before retrying
-                    for c_cand in (target_cat.text_channels if target_cat else guild.text_channels):
-                        if c_cand.name.lower() == ch_name.lower():
-                            target_ch = c_cand
-                            break
-                    if not target_ch:
-                        target_ch = await guild.create_text_channel(
-                            name=ch_name,
-                            category=target_cat,
-                            topic=topic,
-                            overwrites=overwrites,
-                            reason="MomentumOne Unified Webhook Logging System Setup",
-                        )
-                    created_channels.append(target_ch)
+                    await SentinelResourceTracker.record_resource_creation(
+                        guild_id=guild.id,
+                        resource_id=target_ch.id,
+                        resource_type="text_channel",
+                        parent_id=target_cat.id if target_cat else None,
+                        setup_id=setup_id,
+                        purpose=ch_name,
+                        metadata={"name": ch_name, "topic": topic},
+                    )
                 except Exception as err:
                     errors.append(f"Failed to create `#{ch_name}`: {redact_webhook_credentials(str(err))}")
                     continue
@@ -903,10 +865,11 @@ class UnifiedWebhookLogger:
             target_wh: Optional[discord.Webhook] = None
             try:
                 wh_list = await target_ch.webhooks()
-                # Find bot's own webhook or logger webhook
-                target_wh = next((w for w in wh_list if (getattr(w, "user", None) and getattr(w.user, "id", None) == me.id) or (getattr(w, "name", "") or "").startswith(settings.BOT_NAME) or (getattr(w, "name", "") or "").startswith("MomentumOne") or (getattr(w, "name", "") or "").startswith("Sentinel")), None)
-                if not target_wh and wh_list:
-                    target_wh = next((w for w in wh_list if getattr(w, "url", None)), None)
+                # Find webhook recorded in SentinelResourceTracker or created by bot
+                for w in wh_list:
+                    if SentinelResourceTracker.is_resource_owned(guild.id, w.id) or (getattr(w, "user", None) and getattr(w.user, "id", None) == me.id):
+                        target_wh = w
+                        break
 
                 if not target_wh:
                     await asyncio.sleep(0.5)
@@ -914,14 +877,14 @@ class UnifiedWebhookLogger:
                         name=f"{settings.BOT_NAME} Logger",
                         reason=f"{settings.BOT_NAME} Unified Logging Webhook",
                     )
-            except getattr(discord, "RateLimited", Exception) as rle:
-                wait_sec = getattr(rle, "retry_after", 2.0)
-                await report(f"Webhook rate limit. Waiting {wait_sec:.1f}s…")
-                await asyncio.sleep(wait_sec + 0.5)
-                target_wh = await target_ch.create_webhook(
-                    name=f"{settings.BOT_NAME} Logger",
-                    reason=f"{settings.BOT_NAME} Unified Logging Webhook",
-                )
+                    await SentinelResourceTracker.record_resource_creation(
+                        guild_id=guild.id,
+                        resource_id=target_wh.id,
+                        resource_type="webhook",
+                        parent_id=target_ch.id,
+                        setup_id=setup_id,
+                        purpose=f"{ch_name}_webhook",
+                    )
             except Exception as err:
                 errors.append(f"Webhook error in `#{target_ch.name}`: {redact_webhook_credentials(str(err))}")
                 continue
@@ -987,86 +950,118 @@ class UnifiedWebhookLogger:
         deleted_webhooks = []
         errors = []
 
-        # Find target logging channels to clean up
-        managed_ch_ids = set()
-        for d in destinations.values():
-            if isinstance(d, dict) and d.get("channel_id"):
-                cid = str(d["channel_id"])
-                if filter_cids is None or cid in filter_cids:
-                    managed_ch_ids.add(cid)
+        # 1. Load Sentinel's persisted ownership records
+        owned_resources = SentinelResourceTracker.get_all_owned_resources(guild.id)
+        verified_channels = [r for r in owned_resources if r.resource_type == "text_channel"]
+        verified_categories = [r for r in owned_resources if r.resource_type == "category"]
 
-        for cid in managed_ch_ids:
-            ch = guild.get_channel(int(cid))
-            # Invalidate webhook cache
+        # Also identify channels configured in destinations that have Sentinel topic markers
+        dest_channels_to_clean = set()
+        for cat_key, d in destinations.items():
+            if isinstance(d, dict) and d.get("channel_id"):
+                cid_str = str(d.get("channel_id"))
+                if filter_cids is None or cid_str in filter_cids:
+                    dest_channels_to_clean.add(cid_str)
+
+        all_target_cids = {str(r.resource_id) for r in verified_channels}
+        if filter_cids:
+            all_target_cids = all_target_cids.intersection(filter_cids)
+            all_target_cids.update(dest_channels_to_clean)
+        else:
+            all_target_cids.update(dest_channels_to_clean)
+
+        # 2. Process channels for deletion & webhook cleanup
+        for cid in all_target_cids:
             cls._webhook_cache.pop((str(guild.id), cid), None)
+            ch = guild.get_channel(int(cid))
 
             if isinstance(ch, discord.TextChannel):
-                # Verify channel ownership to protect non-logging channels
-                cat_obj = getattr(ch, "category", None)
-                topic_str = getattr(ch, "topic", "") or ""
-                topic_lower = topic_str.lower()
-                is_logging_ch = (
-                    "unified audit" in topic_lower
-                    or "logging" in topic_lower
-                    or "logs" in topic_lower
-                    or "webhook" in topic_lower
-                    or "momentumone" in topic_lower
-                    or "sentinel" in topic_lower
-                    or (cat_obj and str(cat_obj.id) == str(cfg.get("category_id")))
-                )
+                # Verify Sentinel ownership: check tracker OR topic signature inside Sentinel category
+                is_tracker_owned = SentinelResourceTracker.is_resource_owned(guild.id, cid)
+                is_signature_owned = False
+                topic_val = getattr(ch, "topic", "") or ""
+                if (settings.BOT_NAME.lower() in topic_val.lower() or "sentinel" in topic_val.lower()):
+                    if cfg.get("category_id") and str(getattr(ch, "category_id", "")) == str(cfg.get("category_id")):
+                        is_signature_owned = True
+                    elif str(getattr(getattr(ch, "category", None), "id", "")) == str(cfg.get("category_id", "")):
+                        is_signature_owned = True
+                    elif "automated webhook channel" in topic_val.lower():
+                        is_signature_owned = True
 
-                if is_logging_ch and me and getattr(me.guild_permissions, "manage_webhooks", False):
+                if not is_tracker_owned and not is_signature_owned:
+                    logger.warning(f"[UnifiedWebhookLogger] Preserving non-Sentinel channel {ch.id} ({ch.name})")
+                    continue
+
+                if me and getattr(me.guild_permissions, "manage_webhooks", False):
                     try:
                         whs = await ch.webhooks()
                         for wh in whs:
-                            wh_user = getattr(wh, "user", None)
-                            wh_name = getattr(wh, "name", "") or ""
-                            if (wh_user and getattr(wh_user, "id", None) == me.id) or wh_name.startswith(settings.BOT_NAME) or wh_name.startswith("MomentumOne") or wh_name.startswith("Sentinel"):
+                            if SentinelResourceTracker.is_resource_owned(guild.id, wh.id) or (getattr(wh, "user", None) and getattr(wh.user, "id", None) == me.id):
                                 await wh.delete(reason=f"{settings.BOT_NAME} Logging Resource Decommission")
-                                deleted_webhooks.append(wh_name)
+                                deleted_webhooks.append(wh.name)
+                                await SentinelResourceTracker.remove_resource_record(guild.id, wh.id)
                     except Exception as err:
                         errors.append(f"Webhook deletion error in <#{cid}>: {redact_webhook_credentials(str(err))}")
 
-                if delete_from_discord and is_logging_ch and me and getattr(me.guild_permissions, "manage_channels", False):
+                if delete_from_discord and me and getattr(me.guild_permissions, "manage_channels", False):
                     try:
                         ch_name = getattr(ch, "name", f"channel-{cid}")
                         await ch.delete(reason=f"{settings.BOT_NAME} Logging Resource Decommission")
                         deleted_channels.append(ch_name)
+                        await SentinelResourceTracker.remove_resource_record(guild.id, cid)
                     except Exception as err:
                         errors.append(f"Channel deletion error for <#{cid}>: {redact_webhook_credentials(str(err))}")
+            else:
+                await SentinelResourceTracker.remove_resource_record(guild.id, cid)
 
-        # Remove cleaned up channels from destinations
-        new_destinations = {}
-        for cat, d in destinations.items():
-            if isinstance(d, dict) and str(d.get("channel_id")) in managed_ch_ids:
-                continue
-            new_destinations[cat] = d
+        # 3. Update destinations in config
+        if filter_cids is None:
+            new_destinations = {}
+        else:
+            new_destinations = {}
+            for cat, d in destinations.items():
+                if isinstance(d, dict) and str(d.get("channel_id")) in all_target_cids:
+                    continue
+                new_destinations[cat] = d
 
-        # Check category cleanup if requested
+        # 4. Check category cleanup if requested
         deleted_cat = False
-        cat_id = cfg.get("category_id")
-        if delete_category and cat_id:
-            cat = None
-            for c in (guild.categories or []):
-                if str(getattr(c, "id", "")) == str(cat_id):
-                    cat = c
-                    break
-            if not cat:
-                cat = guild.get_channel(int(cat_id))
+        if delete_category:
+            candidate_cat_ids = {str(r.resource_id) for r in verified_categories}
+            if cfg.get("category_id"):
+                candidate_cat_ids.add(str(cfg.get("category_id")))
 
-            if cat and me and getattr(me.guild_permissions, "manage_channels", False):
-                # Ensure category is empty or only contained logging channels
-                cat_channels = getattr(cat, "channels", []) or []
-                remaining = [c for c in cat_channels if str(getattr(c, "id", "")) not in managed_ch_ids]
-                if not remaining:
-                    try:
-                        await cat.delete(reason=f"{settings.BOT_NAME} Logging Category Decommission")
-                        deleted_cat = True
-                    except Exception as err:
-                        errors.append(f"Category deletion error: {redact_webhook_credentials(str(err))}")
+            for cat_id_str in candidate_cat_ids:
+                cat = guild.get_channel(int(cat_id_str))
+                if not cat:
+                    for c in getattr(guild, "categories", []) or []:
+                        if str(getattr(c, "id", "")) == cat_id_str:
+                            cat = c
+                            break
+
+                if cat and me and getattr(me.guild_permissions, "manage_channels", False):
+                    cat_channels = getattr(cat, "channels", []) or []
+                    remaining_non_sentinel = [
+                        c for c in cat_channels
+                        if not SentinelResourceTracker.is_resource_owned(guild.id, c.id)
+                        and "sentinel" not in (getattr(c, "topic", "") or "").lower()
+                    ]
+                    if not remaining_non_sentinel:
+                        try:
+                            await cat.delete(reason=f"{settings.BOT_NAME} Logging Category Decommission")
+                            deleted_cat = True
+                            await SentinelResourceTracker.remove_resource_record(guild.id, cat_id_str)
+                        except Exception as err:
+                            errors.append(f"Category deletion error: {redact_webhook_credentials(str(err))}")
+                    else:
+                        logger.warning(f"[UnifiedWebhookLogger] Preserving category {cat.name} ({cat.id}) as it contains non-Sentinel resources.")
+                else:
+                    await SentinelResourceTracker.remove_resource_record(guild.id, cat_id_str)
 
         # Update and persist config
         is_still_enabled = len(new_destinations) > 0 and cfg.get("enabled", False)
+        if filter_cids is None:
+            is_still_enabled = False
         updates = {
             "destinations": new_destinations,
             "enabled": is_still_enabled,

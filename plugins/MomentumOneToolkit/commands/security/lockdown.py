@@ -221,9 +221,29 @@ async def _handle_status(message: Any, guild: Any, policy: SecurityResponsePolic
     return await send_response(message, box)
 
 
+_IN_FLIGHT_LOCKDOWNS: Set[str] = set()
+
+
+def is_guild_lockdown_in_flight(guild_id: Any) -> bool:
+    """Checks whether an emergency lockdown or recovery operation is currently in flight."""
+    return str(guild_id) in _IN_FLIGHT_LOCKDOWNS
+
+
 async def _handle_trigger(message: Any, guild: Any, author: Any, reason: str, force: bool = False):
-    """Manually triggers emergency containment with safeguards and confirmation."""
+    """Manually triggers emergency containment with safeguards, confirmation, and in-flight locking."""
     gid = str(guild.id)
+
+    # In-flight lock to prevent duplicate concurrent button clicks
+    if gid in _IN_FLIGHT_LOCKDOWNS:
+        box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("warning", "#F59E0B"))
+            .add_text_display(f"### {EMOJIS.get('warning', '⚠️')} Operation Already In Progress")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display("An emergency containment or recovery operation is already executing for this server. Please wait.")
+            .build()
+        )
+        return await send_response(message, box)
 
     # Safeguard: Do not create two backups for a server
     active_lck = lockdown_journal_manager.get_active_lockdown_for_guild(gid)
@@ -306,49 +326,87 @@ async def _handle_trigger(message: Any, guild: Any, author: Any, reason: str, fo
         )
         return await send_response(message, box)
 
-    rec = await security_protection_service.manual_lockdown(
-        guild=guild,
-        admin_id=author.id,
-        reason=reason,
-    )
-    summary = rec.summary
-    box = (
-        ContainerBuilder()
-        .set_accent_color(COLORS.get("danger", "#ED4245"))
-        .add_text_display(f"### 🚨 Emergency Lockdown Triggered")
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_text_display(
-            f"Emergency containment was manually initiated by <@{author.id}>.\n\n"
-            f"• **Session ID:** `{rec.lockdown_id}`\n"
-            f"• **Status:** `{rec.status.upper()}`\n"
-            f"• **Reason:** *{reason}*\n"
-            f"• **Resources Contained:** `{summary.get('applied', 0) + summary.get('verified', 0)}`\n"
-            f"• **Hierarchy Skips:** `{summary.get('skipped_hierarchy', 0)}`\n"
-            f"• **Baseline Checksum:** `{rec.checksum[:16]}...`\n\n"
-            f"To restore permissions, run: `{settings.BOT_PREFIX}lockdown recover {rec.lockdown_id}`"
-        )
-        .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
-        .add_action_row(
-            ActionRowBuilder()
-            .add_button(
-                ButtonBuilder()
-                .set_custom_id(f"lck:do_recover:{gid}")
-                .set_label("Begin Recovery")
-                .set_style(ButtonStyle.Success)
-                .set_emoji(EMOJIS.get("unlock", "🔓"))
+    # Acquire lock and show immediate processing container
+    _IN_FLIGHT_LOCKDOWNS.add(gid)
+    try:
+        processing_box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("warning", "#F59E0B"))
+            .add_text_display(f"### {EMOJIS.get('refresh', '🔄')} Emergency Lockdown in Progress")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"Sentinel is executing containment protocol for **{guild.name}**:\n\n"
+                f"• **Step 1:** Capturing pre-lockdown baseline & 64-bit role bitfields\n"
+                f"• **Step 2:** Persisting tamper-evident snapshot to database\n"
+                f"• **Step 3:** Stripping dangerous administrative permissions\n"
+                f"• **Step 4:** Applying channel & category overwrites\n\n"
+                f"-# *This operation is atomic and idempotent. Please wait…*"
             )
-            .add_button(
-                ButtonBuilder()
-                .set_custom_id(f"lck:journal:{gid}")
-                .set_label("Inspect Journal")
-                .set_style(ButtonStyle.Secondary)
-                .set_emoji(EMOJIS.get("info", "📋"))
-            )
+            .build()
         )
-        .add_text_display(f"-# {settings.BOT_NAME} Reversible Protection")
-        .build()
-    )
-    return await send_response(message, box)
+        if hasattr(message, "response") and not message.response.is_done():
+            await message.response.edit_message(view=processing_box)
+        elif hasattr(message, "edit"):
+            await message.edit(view=processing_box)
+
+        rec = await security_protection_service.manual_lockdown(
+            guild=guild,
+            admin_id=author.id,
+            reason=reason,
+        )
+        summary = rec.summary
+
+        # Verified outcome container
+        if rec.status == LockdownStatus.VERIFIED or (rec.is_shadow_mode and rec.status == LockdownStatus.ACTIVE):
+            title = f"### {EMOJIS.get('check', '✅')} Emergency Lockdown Completed"
+            accent_col = COLORS.get("danger", "#ED4245")
+        elif rec.status == LockdownStatus.PARTIAL:
+            title = f"### {EMOJIS.get('warning', '⚠️')} Emergency Lockdown Partially Completed"
+            accent_col = COLORS.get("warning", "#F59E0B")
+        else:
+            title = f"### {EMOJIS.get('cross', '❌')} Emergency Lockdown Failed"
+            accent_col = COLORS.get("error", "#B21F1F")
+
+        box = (
+            ContainerBuilder()
+            .set_accent_color(accent_col)
+            .add_text_display(title)
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"Emergency containment was initiated by <@{author.id}>.\n\n"
+                f"• **Session ID:** `{rec.lockdown_id}`\n"
+                f"• **Verified Status:** `{rec.status.upper()}`\n"
+                f"• **Reason:** *{reason}*\n"
+                f"• **Resources Contained:** `{summary.get('applied', 0) + summary.get('verified', 0)}`\n"
+                f"• **Hierarchy Skips:** `{summary.get('skipped_hierarchy', 0)}`\n"
+                f"• **API Failures:** `{summary.get('failed_api', 0)}`\n"
+                f"• **Baseline Checksum:** `{rec.checksum[:16]}...`\n\n"
+                f"To restore permissions, run: `{settings.BOT_PREFIX}lockdown recover {rec.lockdown_id}`"
+            )
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_action_row(
+                ActionRowBuilder()
+                .add_button(
+                    ButtonBuilder()
+                    .set_custom_id(f"lck:do_recover:{gid}")
+                    .set_label("Begin Recovery")
+                    .set_style(ButtonStyle.Success)
+                    .set_emoji(EMOJIS.get("unlock", "🔓"))
+                )
+                .add_button(
+                    ButtonBuilder()
+                    .set_custom_id(f"lck:journal:{gid}")
+                    .set_label("Inspect Journal")
+                    .set_style(ButtonStyle.Secondary)
+                    .set_emoji(EMOJIS.get("info", "📋"))
+                )
+            )
+            .add_text_display(f"-# {settings.BOT_NAME} Reversible Protection")
+            .build()
+        )
+        return await send_response(message, box)
+    finally:
+        _IN_FLIGHT_LOCKDOWNS.discard(gid)
 
 
 async def _handle_recover(
@@ -358,8 +416,21 @@ async def _handle_recover(
     policy: SecurityResponsePolicy,
     target_id: Optional[str] = None,
 ):
-    """Executes or approves recovery rollback with quorum enforcement."""
+    """Executes or approves recovery rollback with quorum enforcement and in-flight locking."""
     gid = str(guild.id)
+
+    # In-flight lock to prevent duplicate concurrent button clicks
+    if gid in _IN_FLIGHT_LOCKDOWNS:
+        box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("warning", "#F59E0B"))
+            .add_text_display(f"### {EMOJIS.get('warning', '⚠️')} Operation Already In Progress")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display("A recovery operation is already executing for this server. Please wait.")
+            .build()
+        )
+        return await send_response(message, box)
+
     active_lck = None
     if target_id:
         active_lck = lockdown_journal_manager.get_lockdown(target_id)
@@ -402,8 +473,29 @@ async def _handle_recover(
             )
             return await send_response(message, box)
 
-    # Execute recovery rollback
+    # Acquire lock and show immediate processing container
+    _IN_FLIGHT_LOCKDOWNS.add(gid)
     try:
+        processing_box = (
+            ContainerBuilder()
+            .set_accent_color(COLORS.get("info", "#0844C5"))
+            .add_text_display(f"### {EMOJIS.get('refresh', '🔄')} Server Recovery in Progress")
+            .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
+            .add_text_display(
+                f"Sentinel is restoring pre-lockdown permissions for **{guild.name}**:\n\n"
+                f"• **Step 1:** Verifying baseline cryptographic snapshot\n"
+                f"• **Step 2:** Detecting independent post-lockdown admin modifications\n"
+                f"• **Step 3:** Restoring role permissions and channel overwrites\n"
+                f"• **Step 4:** Verifying restored permissions state\n\n"
+                f"-# *Reversible rollback in progress. Please wait…*"
+            )
+            .build()
+        )
+        if hasattr(message, "response") and not message.response.is_done():
+            await message.response.edit_message(view=processing_box)
+        elif hasattr(message, "edit"):
+            await message.edit(view=processing_box)
+
         rec = await emergency_lockdown_manager.restore_lockdown(
             guild=guild,
             lockdown_id=active_lck.lockdown_id,
@@ -412,6 +504,9 @@ async def _handle_recover(
         )
 
         conflicts = rec.summary.get("conflict_detected", 0)
+        failed_restores = rec.summary.get("failed_restore", 0)
+        restored = rec.summary.get("restored", 0)
+
         conflict_msg = (
             f"\n\n⚠️ **Human Changes Preserved:** `{conflicts}` resource(s) were modified by admins post-lockdown; "
             f"Sentinel preserved these changes without overwriting them."
@@ -419,17 +514,31 @@ async def _handle_recover(
             else ""
         )
 
+        # Verified outcome status
+        if rec.status == LockdownStatus.RESTORED:
+            outcome_title = f"### {EMOJIS.get('check', '✅')} Server Recovery Completed"
+            outcome_col = COLORS.get("success", "#3FD438")
+        elif rec.status == LockdownStatus.PARTIAL:
+            outcome_title = f"### {EMOJIS.get('warning', '⚠️')} Server Recovery Partially Completed"
+            outcome_col = COLORS.get("warning", "#F59E0B")
+        elif rec.status == LockdownStatus.OVERRIDDEN_BY_ADMIN:
+            outcome_title = f"### {EMOJIS.get('balance', '⚖️')} Server Recovery: Admin Overrides Preserved"
+            outcome_col = COLORS.get("info", "#0844C5")
+        else:
+            outcome_title = f"### {EMOJIS.get('cross', '❌')} Server Recovery Failed"
+            outcome_col = COLORS.get("error", "#B21F1F")
+
         box = (
             ContainerBuilder()
-            .set_accent_color(COLORS.get("success", "#3FD438"))
-            .add_text_display(f"### {EMOJIS.get('check', '✅')} Server Recovery Completed")
+            .set_accent_color(outcome_col)
+            .add_text_display(outcome_title)
             .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
             .add_text_display(
-                f"Emergency containment for `{rec.lockdown_id}` has been lifted by <@{uid_str}>.\n\n"
-                f"• **Status:** `{rec.status.upper()}`\n"
-                f"• **Restored Resources:** `{rec.summary.get('restored', 0)}`\n"
-                f"• **Conflict Preserved:** `{conflicts}`\n"
-                f"• **Failed Rollbacks:** `{rec.summary.get('failed_restore', 0)}`{conflict_msg}"
+                f"Emergency containment for `{rec.lockdown_id}` has been processed by <@{uid_str}>.\n\n"
+                f"• **Verified Status:** `{rec.status.upper()}`\n"
+                f"• **Restored Resources:** `{restored}`\n"
+                f"• **Conflicts Preserved:** `{conflicts}`\n"
+                f"• **Failed Rollbacks:** `{failed_restores}`{conflict_msg}"
             )
             .add_separator(divider=True, spacing=SeparatorSpacingSize.Small)
             .add_text_display(f"-# {settings.BOT_NAME} Recovery Verification")
@@ -446,6 +555,8 @@ async def _handle_recover(
             .build()
         )
         return await send_response(message, box)
+    finally:
+        _IN_FLIGHT_LOCKDOWNS.discard(gid)
 
 
 def build_posture_view(guild: Any, policy: SecurityResponsePolicy) -> Any:

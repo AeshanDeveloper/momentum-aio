@@ -47,11 +47,12 @@ class LockdownStatus:
     ACTIVE = "active"
     PARTIAL = "partial"                  # Applied with limitations (e.g. role hierarchy or missing bot perms)
     VERIFIED = "verified"                # Successfully applied and cryptographically/permission verified
+    RESTORING = "restoring"              # Recovery currently in progress
     RESTORED = "restored"
     OVERRIDDEN_BY_ADMIN = "overridden_by_admin"
     FAILED = "failed"
 
-    ALL = {REQUESTED, ATTEMPTED, ACTIVE, PARTIAL, VERIFIED, RESTORED, OVERRIDDEN_BY_ADMIN, FAILED}
+    ALL = {REQUESTED, ATTEMPTED, ACTIVE, PARTIAL, VERIFIED, RESTORING, RESTORED, OVERRIDDEN_BY_ADMIN, FAILED}
 
 
 # Standard dangerous permission names in Discord

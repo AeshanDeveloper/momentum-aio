@@ -37,6 +37,8 @@ from core.security.response_policy import LockdownStatus
 
 class JournalEntryStatus:
     """State of an individual role or channel permission modification."""
+    CAPTURED = "captured"
+    PLANNED = "planned"
     APPLIED = "applied"
     VERIFIED = "verified"
     SIMULATED = "simulated"
@@ -48,6 +50,8 @@ class JournalEntryStatus:
     FAILED_RESTORE = "failed_restore"
 
     ALL = {
+        CAPTURED,
+        PLANNED,
         APPLIED,
         VERIFIED,
         SIMULATED,

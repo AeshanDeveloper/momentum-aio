@@ -269,6 +269,7 @@ class SecurityProtectionService:
 
         from core.security.antinuke import AntiNukeManager
         from core.logging.webhook_logger import UnifiedWebhookLogger, LogCategory, LogSeverity
+        from core.logging.resource_tracker import SentinelResourceTracker
         cfg = AntiNukeManager.get_guild_config(gid)
         log_cfg = UnifiedWebhookLogger.get_guild_logging_config(gid)
         destinations = log_cfg.get("destinations", {})
@@ -290,16 +291,18 @@ class SecurityProtectionService:
                 except Exception:
                     pass
 
-        # Fallback search channels by name
-        if not target_channel and hasattr(guild, "text_channels"):
-            try:
-                for ch in guild.text_channels:
-                    ch_name = getattr(ch, "name", "").lower()
-                    if "security-log" in ch_name or "forensic" in ch_name or "mod-log" in ch_name or "audit-log" in ch_name:
-                        target_channel = ch
-                        break
-            except Exception:
-                pass
+        # Check verified Sentinel-owned resources for security/forensics channels (never match arbitrary unverified channels)
+        if not target_channel:
+            owned = SentinelResourceTracker.get_all_owned_resources(gid)
+            for rec in owned.values():
+                if rec.resource_type == "text_channel" and ("security" in rec.purpose or "forensic" in rec.purpose):
+                    if hasattr(guild, "get_channel"):
+                        try:
+                            target_channel = guild.get_channel(int(rec.resource_id))
+                            if target_channel:
+                                break
+                        except Exception:
+                            pass
 
         is_shadow = getattr(lockdown_record, "is_shadow_mode", False) if lockdown_record else getattr(incident, "is_shadow_mode", False)
         mode_label = "SHADOW (Simulation)" if is_shadow else "LIVE ENFORCEMENT"

@@ -11,6 +11,7 @@ from core.logging.webhook_logger import (
     get_webhook_display_status,
     redact_webhook_credentials,
 )
+from core.logging.resource_tracker import SentinelResourceTracker
 from sdk.discord.builders import (
     ContainerBuilder,
     ActionRowBuilder,
@@ -418,26 +419,30 @@ async def build_wizard_preview_view(guild: discord.Guild) -> Any:
         else f"{EMOJIS.get('cross', '❌')} Missing required permissions (`Manage Channels` and/or `Manage Webhooks`)."
     )
 
-    # Check for existing category and channels to detect reuse
+    # Check for verified existing category and channels via SentinelResourceTracker or existing guild category
     cfg = UnifiedWebhookLogger.get_guild_logging_config(str(guild.id))
     existing_cat = None
-    if cfg.get("category_id"):
-        existing_cat = discord.utils.get(guild.categories, id=int(cfg["category_id"]))
-    if not existing_cat and mode == "category":
-        for c in (guild.categories or []):
-            c_name_lower = getattr(c, "name", "").strip().lower()
-            if (
-                c_name_lower == cat_name.strip().lower()
-                or c_name_lower in ("momentumone logs", "sentinel logs", "sentinel™ logs")
-                or c_name_lower.endswith(" logs")
-            ):
+    saved_cat_id = cfg.get("category_id")
+    if saved_cat_id and SentinelResourceTracker.is_resource_owned(guild.id, saved_cat_id):
+        for c in (getattr(guild, "categories", []) or []):
+            if str(getattr(c, "id", "")) == str(saved_cat_id):
+                existing_cat = c
+                break
+        if not existing_cat:
+            ch = guild.get_channel(int(saved_cat_id))
+            if isinstance(ch, discord.CategoryChannel):
+                existing_cat = ch
+
+    if not existing_cat:
+        for c in (getattr(guild, "categories", []) or []):
+            if getattr(c, "name", "").lower() == cat_name.lower():
                 existing_cat = c
                 break
 
     category_status = (
         f"• **Target Category:** `📁 {existing_cat.name}` *(Existing category will be reused ✅)*"
         if existing_cat
-        else f"• **Target Category:** `📁 {cat_name}` *(New category will be created ➕)*"
+        else f"• **Target Category:** `📁 {cat_name}` *(New dedicated category will be created ➕)*"
     )
 
     # Determine layout target channels
@@ -466,14 +471,31 @@ async def build_wizard_preview_view(guild: discord.Guild) -> Any:
     channels_preview = []
     reused_count = 0
     new_count = 0
-    search_space = existing_cat.text_channels if existing_cat else guild.text_channels
+    owned_records = {
+        r.purpose: r
+        for r in SentinelResourceTracker.get_all_owned_resources(guild.id)
+        if r.resource_type == "text_channel" and (not existing_cat or r.parent_id == str(existing_cat.id))
+    }
     for ch_name, desc_text in channel_names:
-        found_ch = discord.utils.find(lambda c: c.name.lower() == ch_name.lower(), search_space)
+        rec = owned_records.get(ch_name)
+        found_ch = guild.get_channel(int(rec.resource_id)) if rec else None
+        if not found_ch and existing_cat:
+            cat_chs = getattr(existing_cat, "text_channels", []) or getattr(existing_cat, "channels", []) or []
+            for tc in cat_chs:
+                if getattr(tc, "name", "").lower() == ch_name.lower():
+                    found_ch = tc
+                    break
+        if not found_ch and hasattr(guild, "text_channels"):
+            for tc in getattr(guild, "text_channels", []) or []:
+                if getattr(tc, "name", "").lower() == ch_name.lower():
+                    found_ch = tc
+                    break
+
         if found_ch:
             channels_preview.append(f"• `#{ch_name}` — {desc_text} *(Reuse existing channel ✅)*")
             reused_count += 1
         else:
-            channels_preview.append(f"• `#{ch_name}` — {desc_text} *(Create new channel ➕)*")
+            channels_preview.append(f"• `#{ch_name}` — {desc_text} *(Create dedicated channel under logging category ➕)*")
             new_count += 1
 
     ch_list_str = "\n".join(channels_preview)

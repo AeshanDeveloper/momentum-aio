@@ -22,10 +22,12 @@ from __future__ import annotations
 import time
 import asyncio
 import threading
-from typing import Dict, Any, List, Optional, Set, Tuple, Union
+from typing import Dict, Any, List, Optional, Set, Tuple, Union, Callable
 
 import discord
 from discord import Permissions, PermissionOverwrite
+
+from core.security.role_backup_manager import RoleBackupManager
 
 from config.settings import settings, COLORS, EMOJIS, get_color, get_emoji
 from core.logging.logger import logger
@@ -131,11 +133,12 @@ class EmergencyLockdownManager:
         incident: Incident,
         assessment: AssessmentResult,
         policy: Optional[SecurityResponsePolicy] = None,
+        progress_callback: Optional[Callable[[int, int, str], Any]] = None,
     ) -> LockdownRecord:
         """
         Executes policy-controlled emergency containment on a Discord guild.
         Guarantees idempotency, shadow mode adherence, role hierarchy safety,
-        and atomic journaling.
+        pre-lockdown snapshot persistence, and atomic journaling.
         """
         gid = str(guild.id if guild else incident.guild_id)
         lock = self._get_guild_lock(gid)
@@ -187,13 +190,48 @@ class EmergencyLockdownManager:
 
             bot_member = getattr(guild, "me", None)
 
-            # 3. Step A: Selective Role Dangerous Permission Stripping
-            await self._strip_dangerous_role_permissions(guild, bot_member, pol, is_shadow, record)
+            # Pre-lockdown Phase: Capture baseline snapshots and persist BEFORE modifying anything
+            if progress_callback:
+                try:
+                    await progress_callback(1, 4, "Capturing pre-lockdown state and baseline snapshots…")
+                except Exception:
+                    pass
 
-            # 4. Step B: Channel Overwrite Lockdown
-            await self._apply_channel_lockdown(guild, bot_member, pol, is_shadow, record)
+            # Persistent role backup via RoleBackupManager (64-bit lossless bitfields)
+            if guild and hasattr(guild, "roles"):
+                RoleBackupManager.capture_role_snapshot(
+                    guild=guild,
+                    roles=getattr(guild, "roles", []),
+                    snapshot_id=record.lockdown_id,
+                    operation="emergency_lockdown",
+                )
 
-            # 5. Determine Final Status (Partial vs Full Active / Verified)
+            # Build initial journal entries with pre-lockdown baseline
+            self._plan_role_containment(guild, bot_member, pol, is_shadow, record)
+            self._plan_channel_containment(guild, bot_member, pol, is_shadow, record)
+
+            # CRITICAL: Persist snapshot to database before executing destructive/restrictive changes
+            record.checksum = record.calculate_checksum()
+            record.updated_at = time.time()
+            self.journal.save_lockdown(record)
+
+            # Step A: Apply Selective Role Dangerous Permission Stripping
+            if progress_callback:
+                try:
+                    await progress_callback(2, 4, "Stripping dangerous role permissions…")
+                except Exception:
+                    pass
+            await self._execute_role_containment(guild, bot_member, pol, is_shadow, record)
+
+            # Step B: Apply Channel & Category Overwrite Lockdown
+            if progress_callback:
+                try:
+                    await progress_callback(3, 4, "Applying restrictive channel & category overwrites…")
+                except Exception:
+                    pass
+            await self._execute_channel_containment(guild, bot_member, pol, is_shadow, record)
+
+            # Determine Final Status (Partial vs Full Active / Verified)
             record.update_summary()
             is_partial = record.summary.get("is_partial", False)
             failed_count = record.summary.get("failed_api", 0)
@@ -213,6 +251,12 @@ class EmergencyLockdownManager:
             record.checksum = record.calculate_checksum()
             record.updated_at = time.time()
             self.journal.save_lockdown(record)
+
+            if progress_callback:
+                try:
+                    await progress_callback(4, 4, f"Containment {record.status.upper()} finalized.")
+                except Exception:
+                    pass
 
             # Sync with Incident aggregate
             incident.status = IncidentStatus.CONTAINED
@@ -246,7 +290,7 @@ class EmergencyLockdownManager:
             )
             return record
 
-    async def _strip_dangerous_role_permissions(
+    def _plan_role_containment(
         self,
         guild: Any,
         bot_member: Any,
@@ -254,10 +298,7 @@ class EmergencyLockdownManager:
         is_shadow: bool,
         record: LockdownRecord,
     ) -> None:
-        """
-        Identifies and removes dangerous administrative permissions from target roles.
-        Protects Sentinel's own roles and designated recovery roles.
-        """
+        """Plans role containment entries and captures pre-lockdown permissions."""
         if not guild:
             return
 
@@ -270,22 +311,12 @@ class EmergencyLockdownManager:
         preserved_role_ids = {str(rid) for rid in policy.preserved_recovery_role_ids}
         target_role_ids = {str(rid) for rid in policy.target_role_ids}
 
-        bot_perms = getattr(bot_member, "guild_permissions", Permissions()) if bot_member else Permissions()
-        bot_has_manage_roles = bool(getattr(bot_perms, "manage_roles", False) or getattr(bot_perms, "administrator", False))
-        if not bot_has_manage_roles:
-            logger.warning(
-                f"[EmergencyLockdown] Bot lacks manage_roles/administrator permission in guild {record.guild_id}. "
-                f"Role permissions cannot be stripped; recording hierarchy restrictions."
-            )
-
         for role in roles:
             rid_str = str(role.id)
 
-            # Never strip permissions from Sentinel's own roles
             if role.id in bot_role_ids:
                 continue
 
-            # Never strip permissions from designated recovery roles
             if rid_str in preserved_role_ids:
                 entry = JournalEntry(
                     lockdown_id=record.lockdown_id,
@@ -299,12 +330,10 @@ class EmergencyLockdownManager:
                 record.entries.append(entry)
                 continue
 
-            # If target_role_ids is specified, only strip those; else strip default role (@everyone) and any dangerous role
             is_target = False
             if target_role_ids:
                 is_target = rid_str in target_role_ids
             else:
-                # Default targeting: always target @everyone, and any role with dangerous bits
                 is_default = getattr(role, "is_default", lambda: False)() or role.id == getattr(guild, "id", None)
                 if is_default:
                     is_target = True
@@ -322,12 +351,9 @@ class EmergencyLockdownManager:
             if not is_target:
                 continue
 
-            # Role hierarchy validation
-            can_mod, reason = self.can_modify_role(bot_member, role)
             current_perms = getattr(role, "permissions", None)
             current_val = getattr(current_perms, "value", 0) if current_perms else 0
 
-            # Compute sanitized permissions bitfield
             mask = 0
             for perm_name in policy.dangerous_permissions:
                 bit = DANGEROUS_PERMISSION_FLAGS.get(perm_name, 0)
@@ -345,44 +371,12 @@ class EmergencyLockdownManager:
                 target_name=getattr(role, "name", "Unknown"),
                 before_state=before_dict,
                 applied_state=applied_dict,
+                status=JournalEntryStatus.CAPTURED,
                 metadata={"role_position": getattr(role, "position", 0)},
             )
+            record.entries.append(entry)
 
-            if not can_mod:
-                entry.status = JournalEntryStatus.SKIPPED_HIERARCHY
-                entry.error = reason
-                record.entries.append(entry)
-                continue
-
-            # If current permissions already lack dangerous bits, skip
-            if current_val == new_val:
-                entry.status = JournalEntryStatus.SKIPPED_PRESERVED
-                entry.metadata["reason"] = "Role already lacked dangerous permissions"
-                record.entries.append(entry)
-                continue
-
-            if is_shadow:
-                # Simulated shadow mode execution
-                entry.status = JournalEntryStatus.SIMULATED
-                entry.metadata["shadow_mode"] = True
-                record.entries.append(entry)
-            else:
-                # Live Discord API execution
-                try:
-                    new_permissions_obj = Permissions(new_val)
-                    await role.edit(
-                        permissions=new_permissions_obj,
-                        reason=f"Sentinel Emergency Lockdown: Contained incident {record.incident_id}",
-                    )
-                    entry.status = JournalEntryStatus.VERIFIED
-                    record.entries.append(entry)
-                except Exception as err:
-                    entry.status = JournalEntryStatus.FAILED_API
-                    entry.error = str(err)
-                    record.entries.append(entry)
-                    logger.error(f"[EmergencyLockdown] Failed to edit role {role.name} ({rid_str}): {err}")
-
-    async def _apply_channel_lockdown(
+    def _plan_channel_containment(
         self,
         guild: Any,
         bot_member: Any,
@@ -390,35 +384,45 @@ class EmergencyLockdownManager:
         is_shadow: bool,
         record: LockdownRecord,
     ) -> None:
-        """
-        Applies restrictive channel overwrites across text and voice channels,
-        denying send_messages, connect, threads, etc. for the default role.
-        """
+        """Plans channel and category containment entries and captures pre-lockdown overwrites."""
         if not guild:
             return
 
-        can_mod_chan, chan_reason = self.can_modify_channel_overwrites(bot_member)
-        channels: List[Any] = getattr(guild, "channels", [])
+        # Support both channels and categories
+        targets = []
+        seen_ids = set()
+        for cat in getattr(guild, "categories", []):
+            if cat and cat.id not in seen_ids:
+                targets.append(cat)
+                seen_ids.add(cat.id)
+        for ch in getattr(guild, "channels", []):
+            if ch and ch.id not in seen_ids:
+                targets.append(ch)
+                seen_ids.add(ch.id)
+
         exempt_channels = {str(cid) for cid in policy.exempt_channel_ids}
         default_role = getattr(guild, "default_role", None)
 
         if not default_role:
             return
 
-        for ch in channels:
+        for ch in targets:
             cid_str = str(ch.id)
             if cid_str in exempt_channels:
                 continue
 
-            # Read current overwrite for default_role
             overwrites = getattr(ch, "overwrites", {})
             current_ow = overwrites.get(default_role)
-            before_dict = {}
+            had_overwrite = (current_ow is not None)
+
+            before_dict = {"had_overwrite": had_overwrite}
             if current_ow:
                 for perm_name in policy.channel_deny_permissions:
                     before_dict[perm_name] = getattr(current_ow, perm_name, None)
 
             applied_dict = {perm_name: False for perm_name in policy.channel_deny_permissions}
+
+            ch_type = "category" if getattr(ch, "type", None) == 4 or hasattr(ch, "channels") else "channel"
 
             entry = JournalEntry(
                 lockdown_id=record.lockdown_id,
@@ -426,31 +430,123 @@ class EmergencyLockdownManager:
                 target_type="channel_overwrite",
                 target_id=str(default_role.id),
                 secondary_id=cid_str,
-                target_name=f"Channel:{getattr(ch, 'name', cid_str)}",
+                target_name=f"{ch_type.capitalize()}:{getattr(ch, 'name', cid_str)}",
                 before_state=before_dict,
                 applied_state=applied_dict,
+                status=JournalEntryStatus.CAPTURED,
                 metadata={"channel_type": str(getattr(ch, "type", "text"))},
             )
+            record.entries.append(entry)
 
-            if not can_mod_chan:
+    async def _execute_role_containment(
+        self,
+        guild: Any,
+        bot_member: Any,
+        policy: SecurityResponsePolicy,
+        is_shadow: bool,
+        record: LockdownRecord,
+    ) -> None:
+        """Applies planned role modifications with hierarchy checking."""
+        bot_perms = getattr(bot_member, "guild_permissions", Permissions()) if bot_member else Permissions()
+        bot_has_manage_roles = bool(getattr(bot_perms, "manage_roles", False) or getattr(bot_perms, "administrator", False))
+
+        for entry in record.entries:
+            if entry.target_type != "role" or entry.status != JournalEntryStatus.CAPTURED:
+                continue
+
+            role = guild.get_role(int(entry.target_id)) if hasattr(guild, "get_role") else None
+            if not role:
+                for r in getattr(guild, "roles", []):
+                    if str(r.id) == str(entry.target_id):
+                        role = r
+                        break
+
+            if not role:
+                entry.status = JournalEntryStatus.FAILED_API
+                entry.error = "Role not found during execution"
+                continue
+
+            can_mod, reason = self.can_modify_role(bot_member, role)
+            if not can_mod or not bot_has_manage_roles:
                 entry.status = JournalEntryStatus.SKIPPED_HIERARCHY
-                entry.error = chan_reason
-                record.entries.append(entry)
+                entry.error = reason or "Bot lacks manage_roles"
+                continue
+
+            current_val = entry.before_state.get("permissions_value", 0)
+            new_val = entry.applied_state.get("permissions_value", 0)
+
+            if current_val == new_val:
+                entry.status = JournalEntryStatus.SKIPPED_PRESERVED
+                entry.metadata["reason"] = "Role already lacked dangerous permissions"
                 continue
 
             if is_shadow:
                 entry.status = JournalEntryStatus.SIMULATED
                 entry.metadata["shadow_mode"] = True
-                record.entries.append(entry)
             else:
                 try:
-                    # Construct new PermissionOverwrite
+                    new_permissions_obj = Permissions(new_val)
+                    await role.edit(
+                        permissions=new_permissions_obj,
+                        reason=f"Sentinel Emergency Lockdown: Contained incident {record.incident_id}",
+                    )
+                    entry.status = JournalEntryStatus.VERIFIED
+                except Exception as err:
+                    entry.status = JournalEntryStatus.FAILED_API
+                    entry.error = str(err)
+                    logger.error(f"[EmergencyLockdown] Failed to edit role {role.name} ({entry.target_id}): {err}")
+
+    async def _execute_channel_containment(
+        self,
+        guild: Any,
+        bot_member: Any,
+        policy: SecurityResponsePolicy,
+        is_shadow: bool,
+        record: LockdownRecord,
+    ) -> None:
+        """Applies planned channel/category modifications."""
+        can_mod_chan, chan_reason = self.can_modify_channel_overwrites(bot_member)
+        default_role = getattr(guild, "default_role", None)
+
+        for entry in record.entries:
+            if entry.target_type != "channel_overwrite" or entry.status != JournalEntryStatus.CAPTURED:
+                continue
+
+            cid = entry.secondary_id
+            ch = None
+            if hasattr(guild, "get_channel"):
+                ch = guild.get_channel(int(cid))
+            if not ch and hasattr(guild, "channels"):
+                for c in guild.channels:
+                    if str(c.id) == str(cid):
+                        ch = c
+                        break
+            if not ch and hasattr(guild, "categories"):
+                for c in guild.categories:
+                    if str(c.id) == str(cid):
+                        ch = c
+                        break
+
+            if not ch or not default_role:
+                entry.status = JournalEntryStatus.FAILED_API
+                entry.error = "Channel or default role not found during execution"
+                continue
+
+            if not can_mod_chan:
+                entry.status = JournalEntryStatus.SKIPPED_HIERARCHY
+                entry.error = chan_reason
+                continue
+
+            if is_shadow:
+                entry.status = JournalEntryStatus.SIMULATED
+                entry.metadata["shadow_mode"] = True
+            else:
+                try:
+                    current_ow = getattr(ch, "overwrites", {}).get(default_role)
                     new_ow = PermissionOverwrite()
                     if current_ow:
-                        # Copy existing settings
                         for k, v in getattr(current_ow, "__dict__", {}).items():
                             setattr(new_ow, k, v)
-                    # Apply explicit denies based on channel capabilities
                     is_voice = getattr(ch, "type", None) == 2 or isinstance(ch, getattr(discord, "VoiceChannel", ()))
                     deny_perms = list(policy.channel_deny_permissions)
                     if is_voice:
@@ -471,14 +567,11 @@ class EmergencyLockdownManager:
                             overwrites=cur_ows,
                             reason=f"Sentinel Emergency Lockdown: Channel restricted for {record.incident_id}",
                         )
-
                     entry.status = JournalEntryStatus.VERIFIED
-                    record.entries.append(entry)
                 except Exception as err:
                     entry.status = JournalEntryStatus.FAILED_API
                     entry.error = str(err)
-                    record.entries.append(entry)
-                    logger.error(f"[EmergencyLockdown] Failed to set permissions on channel {getattr(ch, 'name', cid_str)}: {err}")
+                    logger.error(f"[EmergencyLockdown] Failed to set permissions on channel {getattr(ch, 'name', cid)}: {err}")
 
     # Reversible Recovery Execution
     async def restore_lockdown(
@@ -488,6 +581,7 @@ class EmergencyLockdownManager:
         admin_user_id: Union[str, int],
         policy: Optional[SecurityResponsePolicy] = None,
         force: bool = False,
+        progress_callback: Optional[Callable[[int, int, str], Any]] = None,
     ) -> LockdownRecord:
         """
         Reverses Sentinel's lockdown changes by restoring exact pre-lockdown baseline permissions.
@@ -510,17 +604,33 @@ class EmergencyLockdownManager:
                 f"[EmergencyLockdown] Beginning recovery for lockdown {lockdown_id} on guild {gid} (Initiated by {admin_user_id}, Force: {force})"
             )
 
+            # Explicit state transition to RESTORING
+            record.status = LockdownStatus.RESTORING
+            record.updated_at = time.time()
+            self.journal.save_lockdown(record)
+
+            if progress_callback:
+                try:
+                    await progress_callback(1, 3, "Validating baseline permissions and conflict status…")
+                except Exception:
+                    pass
+
             restored_count = 0
             conflict_count = 0
             failed_count = 0
 
             # Process entries for restoration
-            for entry in record.entries:
-                # Only restore entries that were actually APPLIED/VERIFIED, previously FAILED_RESTORE, or CONFLICT_DETECTED on forced retry
-                eligible_statuses = (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED, JournalEntryStatus.FAILED_RESTORE)
-                if entry.status not in eligible_statuses and not (force and entry.status == JournalEntryStatus.CONFLICT_DETECTED):
-                    continue
+            eligible_entries = [
+                e for e in record.entries
+                if e.status in (JournalEntryStatus.APPLIED, JournalEntryStatus.VERIFIED, JournalEntryStatus.FAILED_RESTORE)
+                or (force and e.status == JournalEntryStatus.CONFLICT_DETECTED)
+            ]
 
+            total_entries = max(1, len(eligible_entries))
+            current_idx = 0
+
+            for entry in eligible_entries:
+                current_idx += 1
                 if entry.target_type == "role":
                     res_status, err = await self._restore_role_entry(guild, entry, is_shadow, force)
                 elif entry.target_type == "channel_overwrite":
@@ -540,6 +650,12 @@ class EmergencyLockdownManager:
                 elif res_status == JournalEntryStatus.FAILED_RESTORE:
                     failed_count += 1
 
+                if progress_callback and current_idx % 5 == 0:
+                    try:
+                        await progress_callback(2, 3, f"Restoring permissions… ({current_idx}/{total_entries})")
+                    except Exception:
+                        pass
+
             # Update record status
             record.update_summary()
             if conflict_count > 0 and restored_count == 0:
@@ -554,6 +670,12 @@ class EmergencyLockdownManager:
             record.updated_at = time.time()
             self.journal.save_lockdown(record)
 
+            if progress_callback:
+                try:
+                    await progress_callback(3, 3, f"Recovery {record.status.upper()} finalized.")
+                except Exception:
+                    pass
+
             logger.info(
                 f"[EmergencyLockdown] Recovery completed for {lockdown_id}. Result: {record.status} "
                 f"(Restored: {restored_count}, Conflicts Preserved: {conflict_count}, Failed: {failed_count})"
@@ -567,7 +689,7 @@ class EmergencyLockdownManager:
         is_shadow: bool,
         force: bool,
     ) -> Tuple[str, Optional[str]]:
-        """Restores a role entry with post-lockdown conflict detection."""
+        """Restores a role entry with post-lockdown conflict detection and missing role detection."""
         if not guild:
             return JournalEntryStatus.RESTORED, None
 
@@ -580,7 +702,7 @@ class EmergencyLockdownManager:
                     break
 
         if not role:
-            return JournalEntryStatus.FAILED_RESTORE, f"Role {entry.target_id} no longer exists in guild"
+            return JournalEntryStatus.FAILED_RESTORE, f"Role {entry.target_id} no longer exists in guild (deleted)"
 
         # Read current state
         current_perms = getattr(role, "permissions", None)
@@ -627,20 +749,34 @@ class EmergencyLockdownManager:
         is_shadow: bool,
         force: bool,
     ) -> Tuple[str, Optional[str]]:
-        """Restores a channel overwrite entry with conflict detection."""
+        """Restores a channel overwrite entry with conflict detection, had_overwrite handling, and missing channel detection."""
         if not guild or not entry.secondary_id:
             return JournalEntryStatus.RESTORED, None
 
-        ch = guild.get_channel(int(entry.secondary_id)) if hasattr(guild, "get_channel") else None
+        cid = entry.secondary_id
+        ch = None
+        if hasattr(guild, "get_channel"):
+            ch = guild.get_channel(int(cid))
+        if not ch and hasattr(guild, "channels"):
+            for c in guild.channels:
+                if str(c.id) == str(cid):
+                    ch = c
+                    break
+        if not ch and hasattr(guild, "categories"):
+            for c in guild.categories:
+                if str(c.id) == str(cid):
+                    ch = c
+                    break
+
         if not ch:
-            return JournalEntryStatus.FAILED_RESTORE, f"Channel {entry.secondary_id} not found"
+            return JournalEntryStatus.FAILED_RESTORE, f"Channel {entry.secondary_id} no longer exists in guild (deleted)"
 
         target_obj = guild.get_role(int(entry.target_id)) if hasattr(guild, "get_role") else None
         if not target_obj:
             target_obj = getattr(guild, "default_role", None)
 
         if not target_obj:
-            return JournalEntryStatus.FAILED_RESTORE, f"Target role {entry.target_id} not found"
+            return JournalEntryStatus.FAILED_RESTORE, f"Target role {entry.target_id} no longer exists in guild"
 
         # Read current overwrite
         overwrites = getattr(ch, "overwrites", {})
@@ -651,17 +787,21 @@ class EmergencyLockdownManager:
                 current_dict[k] = getattr(current_ow, k, None)
         entry.current_state = current_dict
 
-        # Conflict check: did someone manually change these specific keys?
+        # Conflict check: did someone manually change these specific keys post-lockdown?
         if not force and entry.applied_state:
             has_conflict = False
-            for k, applied_v in entry.applied_state.items():
-                cur_v = current_dict.get(k)
-                if cur_v != applied_v:
-                    has_conflict = True
-                    break
+            had_ow_initially = entry.before_state.get("had_overwrite", True)
+            if not had_ow_initially and current_ow is None:
+                has_conflict = False
+            elif current_ow is not None:
+                for k, applied_v in entry.applied_state.items():
+                    cur_v = current_dict.get(k)
+                    if cur_v != applied_v:
+                        has_conflict = True
+                        break
             if has_conflict:
                 logger.warning(
-                    f"[EmergencyLockdown] Conflict detected for channel overwrite on {ch.name}. Preserving admin changes."
+                    f"[EmergencyLockdown] Conflict detected for channel overwrite on {getattr(ch, 'name', cid)}. Preserving admin changes."
                 )
                 return JournalEntryStatus.CONFLICT_DETECTED, "Independent admin changes detected on channel overwrite"
 
@@ -670,20 +810,51 @@ class EmergencyLockdownManager:
         if is_shadow:
             return JournalEntryStatus.RESTORED, None
 
-        try:
-            # Restore original overwrite values
-            new_ow = current_ow or PermissionOverwrite()
-            for k, before_v in entry.before_state.items():
-                setattr(new_ow, k, before_v)
+        had_overwrite = entry.before_state.get("had_overwrite", True)
 
-            await ch.set_permissions(
-                target_obj,
-                overwrite=new_ow,
-                reason=f"Sentinel Recovery: Restored channel permissions for lockdown {entry.lockdown_id}",
-            )
+        try:
+            if not had_overwrite:
+                # Channel originally had NO overwrite for default_role: clear overwrite completely!
+                if hasattr(ch, "set_permissions"):
+                    await ch.set_permissions(
+                        target_obj,
+                        overwrite=None,
+                        reason=f"Sentinel Recovery: Cleared lockdown overwrite for {entry.lockdown_id}",
+                    )
+                elif hasattr(ch, "edit"):
+                    cur_ows = dict(getattr(ch, "overwrites", {}))
+                    cur_ows.pop(target_obj, None)
+                    await ch.edit(
+                        overwrites=cur_ows,
+                        reason=f"Sentinel Recovery: Cleared lockdown overwrite for {entry.lockdown_id}",
+                    )
+                if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
+                    ch.overwrites.pop(target_obj, None)
+            else:
+                # Channel originally had an overwrite: restore original settings
+                new_ow = current_ow or PermissionOverwrite()
+                for k, before_v in entry.before_state.items():
+                    if k not in ("had_overwrite", "channel_type", "name"):
+                        setattr(new_ow, k, before_v)
+
+                if hasattr(ch, "set_permissions"):
+                    await ch.set_permissions(
+                        target_obj,
+                        overwrite=new_ow,
+                        reason=f"Sentinel Recovery: Restored channel permissions for lockdown {entry.lockdown_id}",
+                    )
+                elif hasattr(ch, "edit"):
+                    cur_ows = dict(getattr(ch, "overwrites", {}))
+                    cur_ows[target_obj] = new_ow
+                    await ch.edit(
+                        overwrites=cur_ows,
+                        reason=f"Sentinel Recovery: Restored channel permissions for lockdown {entry.lockdown_id}",
+                    )
+                if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
+                    ch.overwrites[target_obj] = new_ow
             return JournalEntryStatus.RESTORED, None
         except Exception as err:
-            logger.error(f"[EmergencyLockdown] Failed to restore channel overwrite on {ch.name}: {err}")
+            logger.error(f"[EmergencyLockdown] Failed to restore channel overwrite on {getattr(ch, 'name', cid)}: {err}")
             return JournalEntryStatus.FAILED_RESTORE, str(err)
 
     # Diagnostic & Posture Auditing
