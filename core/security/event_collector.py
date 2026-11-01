@@ -48,12 +48,18 @@ class SecurityEventCollector:
         # Bounded deduplication tracking: dedup_key -> (timestamp, SecurityEvent)
         self._dedup_cache: Dict[str, Tuple[float, SecurityEvent]] = {}
         self._dedup_ttl_seconds = dedup_ttl_seconds
+        self._duplicate_event_count: int = 0
 
         # Subscribers: list of (callback, event_types_filter, min_confidence_filter)
         self._subscribers: List[Tuple[Callable[[SecurityEvent], Any], Optional[Set[str]], Optional[str]]] = []
 
         # Background enrichment tasks tracking
         self._pending_tasks: Set[asyncio.Task] = set()
+
+    @property
+    def duplicate_event_count(self) -> int:
+        """Returns total suppressed duplicate events count."""
+        return self._duplicate_event_count
 
     @classmethod
     def get_instance(cls) -> "SecurityEventCollector":
@@ -162,6 +168,7 @@ class SecurityEventCollector:
                 return existing_event
 
             # Otherwise suppress duplicate signal
+            self._duplicate_event_count += 1
             event.status = SecurityEventStatus.SUPPRESSED_DUPLICATE
             event.event_id = existing_event.event_id
             return event
@@ -197,6 +204,18 @@ class SecurityEventCollector:
             self._dispatch_event(event)
 
         return event
+
+    def ingest_event(
+        self,
+        event: SecurityEvent,
+        audit_lookup_coro: Optional[Callable[[], Any]] = None,
+        discord_guild: Optional[discord.Guild] = None,
+    ) -> Optional[SecurityEvent]:
+        """Alias for ingest() to support pipeline collectors and tests. Returns None if deduplicated."""
+        res = self.ingest(event=event, audit_lookup_coro=audit_lookup_coro, discord_guild=discord_guild)
+        if res and res.status == SecurityEventStatus.SUPPRESSED_DUPLICATE:
+            return None
+        return res
 
     async def _enrich_and_dispatch(
         self,

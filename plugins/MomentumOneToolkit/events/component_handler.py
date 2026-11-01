@@ -1876,18 +1876,96 @@ async def execute(ctx: Any, interaction: discord.Interaction):
         # ----------------------------------------------------------------------
         # 18. Security Explanations & Glossary (sec_exp:)
         # ----------------------------------------------------------------------
-        if custom_id.startswith("sec_exp:"):
-            from plugins.MomentumOneToolkit.commands.security.explain import build_explain_container
-            parts = custom_id.split(":")
-            action = parts[1] if len(parts) > 1 else "select"
+        # ----------------------------------------------------------------------
+        # 19. Interactive Moderation Confirmation Actions (mod_confirm: / mod_cancel:)
+        # ----------------------------------------------------------------------
+        if custom_id.startswith("mod_confirm:") or custom_id.startswith("mod_cancel:"):
+            from core.security.rate_limiter import sentinel_rate_limiter
+            from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
+            from config.settings import get_color, get_emoji
 
-            if action == "select":
-                chosen_term = values[0] if values else "antinuke"
-                v = build_explain_container(selected_key=chosen_term)
+            parts = custom_id.split(":")
+            is_confirm = custom_id.startswith("mod_confirm:")
+            action = parts[1] if len(parts) > 1 else ""
+            target_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
+
+            if not is_confirm:
+                cancel_box = (
+                    ContainerBuilder()
+                    .set_accent_color(get_color("info", "#0844C5"))
+                    .add_text_display(f"### {get_emoji('info', 'ℹ️')} Moderation Action Cancelled")
+                    .add_text_display(f"Operation **{action.upper()}** cancelled by {interaction.user.mention}.")
+                    .build()
+                )
                 if hasattr(interaction, "response") and not interaction.response.is_done():
-                    await interaction.response.edit_message(view=v)
+                    await interaction.response.edit_message(view=cancel_box)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=cancel_box, ephemeral=True)
+                return
+
+            route_key = f"guild:{guild.id}:members"
+            target_member = guild.get_member(target_id) if (guild and target_id) else None
+
+            try:
+                if action == "ban":
+                    await sentinel_rate_limiter.execute_safe_api_call(
+                        lambda: guild.ban(discord.Object(id=target_id), reason=f"Banned by {interaction.user}"),
+                        route_key=route_key,
+                        description=f"Ban user {target_id}",
+                    )
+                    res_box = (
+                        ContainerBuilder()
+                        .set_accent_color(get_color("success", "#10B981"))
+                        .add_text_display(f"### {get_emoji('success', '✅')} Member Banned")
+                        .add_separator(spacing=SeparatorSpacingSize.SMALL)
+                        .add_text_display(f"Successfully banned <@{target_id}> (`{target_id}`).\n**Moderator:** {interaction.user.mention}")
+                        .set_footer("Sentinel™ Enterprise Moderation Core")
+                        .build()
+                    )
+                elif action == "kick":
+                    if target_member:
+                        await sentinel_rate_limiter.execute_safe_api_call(
+                            lambda: target_member.kick(reason=f"Kicked by {interaction.user}"),
+                            route_key=route_key,
+                            description=f"Kick member {target_id}",
+                        )
+                    res_box = (
+                        ContainerBuilder()
+                        .set_accent_color(get_color("success", "#10B981"))
+                        .add_text_display(f"### {get_emoji('success', '✅')} Member Kicked")
+                        .add_separator(spacing=SeparatorSpacingSize.SMALL)
+                        .add_text_display(f"Successfully kicked <@{target_id}> (`{target_id}`).\n**Moderator:** {interaction.user.mention}")
+                        .set_footer("Sentinel™ Enterprise Moderation Core")
+                        .build()
+                    )
+                else:
+                    res_box = (
+                        ContainerBuilder()
+                        .set_accent_color(get_color("success", "#10B981"))
+                        .add_text_display(f"### {get_emoji('success', '✅')} Action Completed")
+                        .add_text_display(f"Action `{action}` successfully applied to <@{target_id}>.")
+                        .build()
+                    )
+
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=res_box)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=res_box)
+            except Exception as e:
+                err_box = (
+                    ContainerBuilder()
+                    .set_accent_color(get_color("error", "#B21F1F"))
+                    .add_text_display(f"### {get_emoji('error', '🚨')} Action Failed")
+                    .add_text_display(f"Failed to execute `{action}`: {e}")
+                    .build()
+                )
+                if hasattr(interaction, "response") and not interaction.response.is_done():
+                    await interaction.response.edit_message(view=err_box)
+                elif hasattr(interaction, "followup"):
+                    await interaction.followup.send(view=err_box, ephemeral=True)
             return
 
     except Exception as err:
         logger.error(f"[ComponentHandler] Component execution error: {err}", exc_info=True)
+
 

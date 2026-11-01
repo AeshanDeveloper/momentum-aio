@@ -103,6 +103,21 @@ def build_security_check_container(
     admins_cfg = f"{notifs.get('trusted_admins_count', 0)} trusted admin(s)"
     fallback_cfg = f"<#{policy.fallback_channel_id}>" if policy.fallback_channel_id else "None"
 
+    # Incident Intelligence & Coalescing diagnostics
+    intel_diag = sentinel_pipeline.get_incident_intelligence_diagnostics(str(guild.id))
+    deliv = intel_diag.get("delivery_metrics", {})
+    active_incs = intel_diag.get("active_incidents", [])
+
+    if active_incs:
+        inc_lines = []
+        for inc in active_incs[:3]:
+            msg_tag = f"Msg: `{inc['primary_alert_message_id']}`" if inc.get("primary_alert_message_id") else "No Alert"
+            pend_tag = f" (Pending Edit v{inc['pending_alert_version']})" if inc.get("pending_alert_edit") else ""
+            inc_lines.append(f"• `{inc['incident_id']}` [{inc['status'].upper()}] {inc['severity'].upper()}/{inc['urgency'].upper()} | {msg_tag}{pend_tag}")
+        incs_display = "\n".join(inc_lines)
+    else:
+        incs_display = "• *No active security incidents on this server.*"
+
     body_text = (
         f"### {status_icon} Pipeline & Observation Health\n"
         f"• **Event Collector:** `{'Running' if collector.get('running') else 'Stopped'}` | "
@@ -112,10 +127,15 @@ def build_security_check_container(
         f"• **Supported Handlers:** `{health.get('registered_handlers_count', 23)}/23` Discord vectors active\n"
         f"• **Queue Backpressure:** `{collector.get('pending_tasks', 0)}` pending task(s) | "
         f"**Dedup Cache:** `{collector.get('dedup_cache_size', 0)}` entries\n\n"
-        f"### ⚡ Threat Detection & Rolling Counters\n"
-        f"• **Activity Counters:** 🟢 Healthy (`{activity.get('tracked_actors_count', 0)}` tracked actors)\n"
-        f"• **Correlation Rules:** 🟢 Healthy (`{correlation.get('loaded_rules_count', 0)}` deterministic rules loaded)\n"
-        f"• **Open Incidents:** `{health.get('open_incidents_count', 0)}` active on this server\n\n"
+        f"### ⚡ Incident Intelligence & Alert Coalescing\n"
+        f"• **Active Incidents:** `{len(active_incs)}` tracking on guild\n"
+        f"{incs_display}\n"
+        f"• **Primary Alerts Sent:** `{deliv.get('total_primary_alerts_sent', 0)}` | "
+        f"**Edits Executed:** `{deliv.get('total_edits_executed', 0)}`\n"
+        f"• **Coalesced Updates:** `{deliv.get('total_edits_coalesced', 0)}` (Anti-Flood) | "
+        f"**Suppressed Fluctuation:** `{deliv.get('total_edits_suppressed', 0)}`\n"
+        f"• **Self-Healed 404s:** `{deliv.get('total_recreations_on_404', 0)}` | "
+        f"**Resolutions:** `{deliv.get('total_resolution_updates', 0)}`\n\n"
         f"### 🛡️ Emergency Protection & Recovery\n"
         f"• **Containment Status:** {containment_display}\n"
         f"• **Response Policy:** `{protection.get('response_level', 'lockdown').upper()}` | **Mode:** `{shadow_display}`\n"

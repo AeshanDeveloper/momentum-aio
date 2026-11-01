@@ -97,6 +97,13 @@ from core.security.consensus_manager import (
     IncidentConsensusManager,
     incident_consensus_manager,
 )
+from core.security.alert_intelligence import (
+    AlertIntelligenceManager,
+    alert_intelligence_manager,
+    AlertDeliveryManager,
+    alert_delivery_manager,
+    NotificationDecision,
+)
 from core.security.antinuke import AntiNukeManager, AntiNukeConstants
 
 
@@ -128,6 +135,8 @@ class SentinelSecurityPipeline:
         prot_service: Optional[SecurityProtectionService] = None,
         comm_service: Optional[SecurityCommunicationService] = None,
         consensus_mgr: Optional[IncidentConsensusManager] = None,
+        alert_intel: Optional[AlertIntelligenceManager] = None,
+        alert_delivery: Optional[AlertDeliveryManager] = None,
     ):
         self.collector: SecurityEventCollector = collector or security_event_collector
         self.activity_manager: SecurityActivityManager = activity_mgr or security_activity_manager
@@ -137,6 +146,8 @@ class SentinelSecurityPipeline:
         self.protection_service: SecurityProtectionService = prot_service or security_protection_service
         self.communication_service: SecurityCommunicationService = comm_service or security_communication_service
         self.consensus_manager: IncidentConsensusManager = consensus_mgr or incident_consensus_manager
+        self.alert_intelligence: AlertIntelligenceManager = alert_intel or alert_intelligence_manager
+        self.alert_delivery: AlertDeliveryManager = alert_delivery or alert_delivery_manager
 
         self.bot_client: Optional[Any] = None
         self._is_initialized = False
@@ -178,10 +189,14 @@ class SentinelSecurityPipeline:
             self.communication_service.protection_service = self.protection_service
             self.communication_service.attach_to_incident_manager(self.bot_client)
 
-            # 6. Hydrate active un-restored lockdowns on startup
-            active_lockdowns = self.protection_service.hydrate_active_lockdowns()
+            # 6. Wire AlertDeliveryManager
+            self.alert_delivery.bot_client = self.bot_client
 
-            # 7. Register singletons in IoC container
+            # 7. Hydrate active un-restored lockdowns and open incidents across restarts
+            active_lockdowns = self.protection_service.hydrate_active_lockdowns()
+            active_incidents = self.incident_manager.hydrate_active_incidents()
+
+            # 8. Register singletons in IoC container
             container.bind("security_event_collector", self.collector)
             container.bind("security_activity_manager", self.activity_manager)
             container.bind("security_correlation_engine", self.correlation_engine)
@@ -190,12 +205,14 @@ class SentinelSecurityPipeline:
             container.bind("security_protection_service", self.protection_service)
             container.bind("security_communication_service", self.communication_service)
             container.bind("incident_consensus_manager", self.consensus_manager)
+            container.bind("alert_intelligence_manager", self.alert_intelligence)
+            container.bind("alert_delivery_manager", self.alert_delivery)
             container.bind("sentinel_security_pipeline", self)
 
             self._is_initialized = True
             logger.info(
                 f"[SentinelPipeline] Security Core successfully initialized. "
-                f"Hydrated {len(active_lockdowns)} active lockdown(s)."
+                f"Hydrated {len(active_lockdowns)} active lockdown(s) and {len(active_incidents)} active incident(s)."
             )
             return True
 

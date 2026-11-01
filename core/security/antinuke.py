@@ -940,19 +940,32 @@ class AntiNukeManager:
         friendly_event = AntiNukeConstants.get_event_display_name(event_type)
         reason = f"{settings.BOT_NAME} Anti-Nuke: Threshold exceeded for {friendly_event}."
 
-        # Attempt to DM user before removing them from guild (so mutual server restriction is not hit)
-        await cls._send_punishment_dm(
-            guild=guild,
-            user=executor,
-            punishment=punishment,
-            event_type=event_type,
-            reason=reason,
-            details=details,
+        # High-confidence emergencies: immediate mitigation MUST precede notification
+        is_high_emergency = punishment in (
+            AntiNukeConstants.PUNISH_BAN,
+            AntiNukeConstants.PUNISH_KICK,
+            AntiNukeConstants.PUNISH_STRIP_ROLES,
+            AntiNukeConstants.PUNISH_QUARANTINE,
+            AntiNukeConstants.PUNISH_TIMEOUT,
         )
+
+        if not is_high_emergency:
+            await cls._send_punishment_dm(
+                guild=guild,
+                user=executor,
+                punishment=punishment,
+                event_type=event_type,
+                reason=reason,
+                details=details,
+            )
 
         try:
             if punishment == AntiNukeConstants.PUNISH_BAN:
                 await guild.ban(executor, reason=reason, delete_message_days=1)
+                # Dispatch DM post-mitigation asynchronously if possible
+                asyncio.create_task(
+                    cls._send_punishment_dm(guild=guild, user=executor, punishment=punishment, event_type=event_type, reason=reason, details=details)
+                )
                 return {"success": True, "punishment": "ban"}
 
             elif punishment == AntiNukeConstants.PUNISH_KICK:

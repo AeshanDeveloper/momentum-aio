@@ -75,7 +75,9 @@ class AssessmentResult:
     timestamp: float = field(default_factory=time.time)
     severity: Optional[str] = None
     confidence: Optional[str] = None
-
+    urgency: str = "medium"  # low, medium, high, critical
+    reason_codes: List[str] = field(default_factory=list)
+    supporting_evidence_count: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -95,6 +97,11 @@ class AssessmentResult:
             "recovery_plan": self.recovery_plan,
             "reasons": self.reasons,
             "timestamp": self.timestamp,
+            "severity": self.severity,
+            "confidence": self.confidence,
+            "urgency": self.urgency,
+            "reason_codes": self.reason_codes,
+            "supporting_evidence_count": self.supporting_evidence_count,
         }
 
 
@@ -215,10 +222,6 @@ class ThreatAssessmentEngine:
         threat_score = max(0.0, min(100.0, round(threat_score, 2)))
 
         # 6. Immediate Emergency Threshold Evaluation
-        # Immediate protection triggers if:
-        # - Signal explicitly requested immediate protection, OR
-        # - Threat score crosses configured threshold, OR
-        # - Severity is CRITICAL and recommendation is emergency lockdown.
         is_emergency = (
             signal.requires_immediate_protection
             or (signal.severity == ThreatSeverity.CRITICAL and signal.recommended_response == ResponseCategory.EMERGENCY_LOCKDOWN)
@@ -228,7 +231,6 @@ class ThreatAssessmentEngine:
         should_trigger_immediate_response = is_emergency
 
         # 7. Action Selection (Protection Separated from Punishment)
-        # Sentinel protects through reversible containment; NEVER permanent bans or mass unbans
         if signal.pattern_id in (PatternID.WEBHOOK_INTEGRATION_ABUSE,):
             recommended_action = ProtectiveActionType.ISOLATE_INTEGRATION
         elif signal.is_whitelisted_actor and signal.actor_id and guild_policy.isolate_whitelisted_compromise:
@@ -242,13 +244,11 @@ class ThreatAssessmentEngine:
             recommended_action = ProtectiveActionType.ALERT_DISPATCH
 
         # 8. Shadow Mode Enforcement
-        # Crucial requirement: Default to shadow mode; real emergency actions must be explicitly enabled
         is_shadow_mode = guild_policy.shadow_mode or (not guild_policy.auto_lockdown_enabled)
         if is_shadow_mode:
             reasons.append("Action evaluated under SHADOW MODE: live permission changes will be simulated")
 
         # 9. Recovery Path & Boundary Safeguards
-        # Generates verification recovery code and ensures Sentinel and Recovery Admins are shielded
         recovery_code = f"SENTINEL-REC-{secrets.token_hex(4).upper()}-{secrets.token_hex(4).upper()}"
         recovery_plan = {
             "recovery_code": recovery_code,
@@ -265,6 +265,34 @@ class ThreatAssessmentEngine:
             ),
         }
 
+        # 10. Urgency & Reason Codes Evaluation
+        if is_emergency or signal.severity == ThreatSeverity.CRITICAL or threat_score >= 80.0:
+            urgency = "critical"
+        elif signal.severity == ThreatSeverity.HIGH or threat_score >= 60.0:
+            urgency = "high"
+        elif signal.severity == ThreatSeverity.MEDIUM or threat_score >= 35.0:
+            urgency = "medium"
+        else:
+            urgency = "low"
+
+        reason_codes: List[str] = []
+        if signal.pattern_id in destructive_patterns:
+            reason_codes.append("RELATED_DESTRUCTIVE_ACTIVITY")
+        if signal.pattern_id in (PatternID.PERMISSION_ESCALATION_THEN_DESTRUCTION, PatternID.DANGEROUS_ROLE_CHANGES_THEN_DESTRUCTION):
+            reason_codes.append("DANGEROUS_PERMISSION_CHANGE")
+        if signal.pattern_id in (PatternID.RAPID_BAN_BURST, PatternID.RAPID_KICK_BURST):
+            reason_codes.append("RAPID_BURST_VOLUME")
+        if len(signal.target_ids) >= 3:
+            reason_codes.append("HIGH_IMPACT_TARGET")
+        if signal.attribution_confidence == AttributionConfidence.UNKNOWN and signal.severity in (ThreatSeverity.HIGH, ThreatSeverity.CRITICAL):
+            reason_codes.append("UNKNOWN_ACTOR_ELEVATED_VELOCITY")
+        if signal.is_whitelisted_actor:
+            reason_codes.append("WHITELIST_ACTOR_DESTRUCTIVE")
+        if signal.pattern_id == PatternID.COORDINATED_MULTI_VECTOR:
+            reason_codes.append("COORDINATED_MULTI_VECTOR_PATTERN")
+        if not reason_codes:
+            reason_codes.append("SECURITY_ACTIVITY_DETECTED")
+
         result = AssessmentResult(
             signal_id=signal.signal_id,
             guild_id=gid,
@@ -280,6 +308,11 @@ class ThreatAssessmentEngine:
             target_ids=list(signal.target_ids),
             recovery_plan=recovery_plan,
             reasons=reasons,
+            severity=signal.severity,
+            confidence=signal.confidence,
+            urgency=urgency,
+            reason_codes=reason_codes,
+            supporting_evidence_count=len(signal.event_ids),
         )
 
         self._notify_subscribers(result)

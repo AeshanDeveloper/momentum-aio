@@ -45,8 +45,24 @@ class IncidentStatus:
     DISMISSED = "dismissed"
     INCONCLUSIVE = "inconclusive"
     RESOLVED = "resolved"
+    OBSERVING = "observing"
+    SUSPICIOUS = "suspicious"
+    ALERTED = "alerted"
+    ESCALATED = "escalated"
 
-    ALL = {ACTIVE, CONTAINED, UNDER_REVIEW, CONFIRMED, DISMISSED, INCONCLUSIVE, RESOLVED}
+    ALL = {
+        ACTIVE,
+        CONTAINED,
+        UNDER_REVIEW,
+        CONFIRMED,
+        DISMISSED,
+        INCONCLUSIVE,
+        RESOLVED,
+        OBSERVING,
+        SUSPICIOUS,
+        ALERTED,
+        ESCALATED,
+    }
 
 
 class ProtectiveActionType:
@@ -497,6 +513,21 @@ class Incident:
     actor_id: Optional[str] = None
     is_whitelisted_actor: Optional[bool] = None
 
+    # Alert Intelligence & Message State Management
+    urgency: str = "medium"
+    reason_codes: List[str] = field(default_factory=list)
+    primary_alert_message_id: Optional[str] = None
+    alert_channel_id: Optional[str] = None
+    last_alert_update_at: Optional[float] = None
+    pending_alert_edit: bool = False
+    pending_alert_version: int = 0
+    alert_delivery_state: str = "idle"
+    alert_retry_count: int = 0
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[float] = None
+    resolution_reason: Optional[str] = None
+    suppression_reason: Optional[str] = None
+
     def __post_init__(self):
         self.guild_id = str(self.guild_id)
         if self.status not in IncidentStatus.ALL:
@@ -517,6 +548,15 @@ class Incident:
             self.actor_id = self.relevant_actors[0].get("actor_id")
         if self.is_whitelisted_actor is None:
             self.is_whitelisted_actor = self.is_whitelisted_actor_involved
+
+    @property
+    def alert_message_id(self) -> Optional[str]:
+        """Returns the primary alert message ID (alias for primary_alert_message_id)."""
+        return self.primary_alert_message_id
+
+    @alert_message_id.setter
+    def alert_message_id(self, val: Optional[str]) -> None:
+        self.primary_alert_message_id = val
 
     @property
     def trigger_rule_id(self) -> str:
@@ -725,11 +765,27 @@ class Incident:
     def mark_dismissed(self, admin_id: str, admin_name: Optional[str] = None, reason: str = "") -> None:
         """Marks incident as dismissed (e.g. false alarm) while strictly preserving all forensic evidence."""
         self.status = IncidentStatus.DISMISSED
+        self.resolved_by = str(admin_id)
+        self.resolved_at = time.time()
+        self.resolution_reason = reason or "Dismissed by administrator"
         self.add_decision(
             actor_id=str(admin_id),
             actor_name=admin_name,
             decision_type=ReviewDecisionType.DISMISS,
             reason=reason or f"Dismissed by {admin_name or admin_id}",
+        )
+
+    def mark_resolved(self, admin_id: str, admin_name: Optional[str] = None, reason: str = "") -> None:
+        """Marks incident as resolved while strictly preserving all forensic evidence."""
+        self.status = IncidentStatus.RESOLVED
+        self.resolved_by = str(admin_id)
+        self.resolved_at = time.time()
+        self.resolution_reason = reason or "Resolved by administrator"
+        self.add_decision(
+            actor_id=str(admin_id),
+            actor_name=admin_name,
+            decision_type=ReviewDecisionType.RESTORE,
+            reason=reason or f"Resolved by {admin_name or admin_id}",
         )
 
     def transition_status(self, new_status: str, actor_id: str, reason: str) -> None:
@@ -773,6 +829,19 @@ class Incident:
             "recovery_code": self.recovery_code,
             "recovery_instructions": self.recovery_instructions,
             "metadata": self.metadata,
+            "urgency": self.urgency,
+            "reason_codes": list(self.reason_codes),
+            "primary_alert_message_id": self.primary_alert_message_id,
+            "alert_channel_id": self.alert_channel_id,
+            "last_alert_update_at": self.last_alert_update_at,
+            "pending_alert_edit": self.pending_alert_edit,
+            "pending_alert_version": self.pending_alert_version,
+            "alert_delivery_state": self.alert_delivery_state,
+            "alert_retry_count": self.alert_retry_count,
+            "resolved_by": self.resolved_by,
+            "resolved_at": self.resolved_at,
+            "resolution_reason": self.resolution_reason,
+            "suppression_reason": self.suppression_reason,
         }
 
     @classmethod
@@ -811,4 +880,17 @@ class Incident:
             recovery_code=data.get("recovery_code"),
             recovery_instructions=data.get("recovery_instructions"),
             metadata=data.get("metadata", {}),
+            urgency=str(data.get("urgency", "medium")),
+            reason_codes=list(data.get("reason_codes", [])),
+            primary_alert_message_id=data.get("primary_alert_message_id") or data.get("alert_message_id"),
+            alert_channel_id=data.get("alert_channel_id"),
+            last_alert_update_at=data.get("last_alert_update_at"),
+            pending_alert_edit=bool(data.get("pending_alert_edit", False)),
+            pending_alert_version=int(data.get("pending_alert_version", 0)),
+            alert_delivery_state=str(data.get("alert_delivery_state", "idle")),
+            alert_retry_count=int(data.get("alert_retry_count", 0)),
+            resolved_by=data.get("resolved_by"),
+            resolved_at=data.get("resolved_at"),
+            resolution_reason=data.get("resolution_reason"),
+            suppression_reason=data.get("suppression_reason"),
         )

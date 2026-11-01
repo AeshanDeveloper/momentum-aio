@@ -62,6 +62,12 @@ from core.security.threat_assessment import (
     threat_assessment_engine,
     AssessmentResult,
 )
+from core.security.alert_intelligence import (
+    alert_intelligence_manager,
+    alert_delivery_manager,
+    NotificationDecision,
+    AlertIntelligenceManager,
+)
 
 
 class IncidentManager:
@@ -169,6 +175,10 @@ class IncidentManager:
         if incident:
             # Merge signal into existing active incident
             incident.add_signal(signal)
+            incident.urgency = assessment.urgency
+            for rc in assessment.reason_codes:
+                if rc not in incident.reason_codes:
+                    incident.reason_codes.append(rc)
             incident.add_decision(
                 actor_id="system:sentinel",
                 decision_type="signal_merged",
@@ -191,6 +201,8 @@ class IncidentManager:
                 recovery_code=assessment.recovery_plan.get("recovery_code"),
                 recovery_instructions=assessment.recovery_plan.get("instructions"),
                 metadata={"initial_pattern": signal.pattern_id},
+                urgency=assessment.urgency,
+                reason_codes=list(assessment.reason_codes),
             )
             incident.add_signal(signal)
             incident.add_decision(
@@ -203,7 +215,7 @@ class IncidentManager:
                     self._incidents[gid] = {}
                 self._incidents[gid][incident.incident_id] = incident
 
-        # 3. Emergency Protective Response Evaluation
+        # 3. Emergency Protective Response Evaluation (CRITICAL: Never blocked on alerts or human review)
         if assessment.should_trigger_immediate_response:
             has_action = any(
                 a.action_type == assessment.recommended_action
@@ -215,7 +227,18 @@ class IncidentManager:
         # 4. Asynchronous Write-Through Persistence
         self._schedule_persist_incident(incident)
 
-        # 5. Notify Incident Subscribers
+        # 5. Alert Intelligence & Delayed Coalescing Dispatch
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                loop.create_task(alert_delivery_manager.process_incident_notification(incident, assessment))
+        except Exception:
+            pass
+
+        # 6. Notify Incident Subscribers
         self._notify_subscribers(incident, assessment)
 
         return incident, assessment
@@ -458,18 +481,93 @@ class IncidentManager:
         """
         Marks an incident as DISMISSED (e.g. false positive or authorized drill).
         CRITICAL: Never deletes the incident record or supporting evidence!
+        Edits primary alert message with resolution details without sending new spam messages.
         """
         incident = self.get_incident(incident_id)
         if not incident:
             return None
 
-        incident.transition_status(
-            new_status=IncidentStatus.DISMISSED,
-            actor_id=str(admin_id),
-            reason=f"Dismissed by {admin_name or admin_id}: {reason}",
-        )
+        incident.mark_dismissed(admin_id=admin_id, admin_name=admin_name, reason=reason)
         self._schedule_persist_incident(incident)
+
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                loop.create_task(alert_delivery_manager.process_incident_notification(incident))
+        except RuntimeError:
+            pass
+
         return incident
+
+    def resolve_incident(
+        self,
+        incident_id: str,
+        admin_id: str,
+        reason: str,
+        admin_name: Optional[str] = None,
+    ) -> Optional[Incident]:
+        """
+        Marks an incident as RESOLVED.
+        Preserves all evidence and edits the primary alert message with resolution info.
+        """
+        incident = self.get_incident(incident_id)
+        if not incident:
+            return None
+
+        incident.mark_resolved(admin_id=admin_id, admin_name=admin_name, reason=reason)
+        self._schedule_persist_incident(incident)
+
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                loop.create_task(alert_delivery_manager.process_incident_notification(incident))
+        except RuntimeError:
+            pass
+
+        return incident
+
+    def hydrate_active_incidents(self, alert_intel: Optional[AlertIntelligenceManager] = None) -> List[Incident]:
+        """
+        Hydrates active and unresolved incidents from MongoDB upon bot restart.
+        Ensures alert_message_id and pending edit states are cleanly loaded into memory without duplicate spam.
+        """
+        hydrated: List[Incident] = []
+        intel_mgr = alert_intel or alert_intelligence_manager
+        try:
+            col = database.collection("security_incidents")
+            query = {
+                "status": {
+                    "$in": [
+                        IncidentStatus.ACTIVE,
+                        IncidentStatus.OBSERVING,
+                        IncidentStatus.SUSPICIOUS,
+                        IncidentStatus.ALERTED,
+                        IncidentStatus.ESCALATED,
+                        IncidentStatus.CONTAINED,
+                        IncidentStatus.UNDER_REVIEW,
+                    ]
+                }
+            }
+            cursor = col.find(query)
+            docs = []
+            if hasattr(cursor, "__iter__"):
+                docs = list(cursor)
+
+            for doc in docs:
+                inc = Incident.from_dict(doc)
+                gid = str(inc.guild_id)
+                with self._sync_lock:
+                    if gid not in self._incidents:
+                        self._incidents[gid] = {}
+                    self._incidents[gid][inc.incident_id] = inc
+                intel_mgr.capture_snapshot(inc)
+                hydrated.append(inc)
+
+            logger.info(f"[IncidentManager] Hydrated {len(hydrated)} active incident(s) across restart.")
+        except Exception as err:
+            logger.debug(f"[IncidentManager] Could not hydrate incidents from database: {err}")
+
+        return hydrated
 
     def confirm_incident(
         self,
