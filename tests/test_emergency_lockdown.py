@@ -602,6 +602,315 @@ class TestEmergencyLockdown(unittest.TestCase):
             self.assertEqual(e.status, JournalEntryStatus.VERIFIED)
             self.assertIsNone(e.error)
 
+    # -------------------------------------------------------------------------
+    # REQUIRED REGRESSION SUITE (TESTS A - L)
+    # Emergency Lockdown Permission Preservation, Snapshots & Reversible Recovery
+    # -------------------------------------------------------------------------
+
+    def test_a_private_owner_channel_visibility_preserved_and_restored(self):
+        """Test A: Private owner channel visibility preserved during lockdown and restored."""
+        owner_chan = TextChannel(id=701, name="owner-private", guild=self.guild)
+        owner_chan.overwrites = {
+            self.role_everyone: PermissionOverwrite(view_channel=False, send_messages=False),
+        }
+        self.guild.channels.append(owner_chan)
+        self.guild.text_channels.append(owner_chan)
+
+        self.assertFalse(owner_chan.permissions_for(self.role_everyone).view_channel)
+
+        incident = Incident(guild_id="12345", title="Owner Channel Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_a", threat_score=95.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        self.assertIn(record.status, (LockdownStatus.ACTIVE, LockdownStatus.VERIFIED, LockdownStatus.PARTIAL))
+
+        # CRITICAL ASSERTION: Channel visibility for @everyone MUST REMAIN False
+        self.assertFalse(owner_chan.permissions_for(self.role_everyone).view_channel)
+        entry = next((e for e in record.entries if e.secondary_id == "701"), None)
+        self.assertIsNotNone(entry)
+        self.assertTrue(entry.original_visibility.get("is_private"))
+        self.assertFalse(entry.applied_state.get("send_messages", True))
+
+        # Recovery
+        rec = asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        self.assertIn(rec.status, (LockdownStatus.RESTORED, LockdownStatus.PARTIAL))
+        self.assertFalse(owner_chan.permissions_for(self.role_everyone).view_channel)
+
+    def test_b_private_logging_channel_never_becomes_visible(self):
+        """Test B: Private logging channel never becomes visible to @everyone."""
+        log_chan = TextChannel(id=702, name="security-audit-logs", guild=self.guild)
+        log_chan.overwrites = {
+            self.role_everyone: PermissionOverwrite(view_channel=False, read_messages=False, send_messages=False),
+            self.guild.me: PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True),
+        }
+        self.guild.channels.append(log_chan)
+
+        self.assertFalse(log_chan.permissions_for(self.role_everyone).view_channel)
+
+        incident = Incident(guild_id="12345", title="Audit Logging Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_b", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        self.assertFalse(log_chan.permissions_for(self.role_everyone).view_channel)
+
+        asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        self.assertFalse(log_chan.permissions_for(self.role_everyone).view_channel)
+
+    def test_c_private_staff_channel_visibility_preserved(self):
+        """Test C: Private staff channel visibility preserved throughout containment."""
+        staff_chan = TextChannel(id=703, name="staff-confidential", guild=self.guild)
+        staff_chan.overwrites = {
+            self.role_everyone: PermissionOverwrite(view_channel=False),
+            self.role_member: PermissionOverwrite(view_channel=True, send_messages=True),
+        }
+        self.guild.channels.append(staff_chan)
+
+        self.assertFalse(staff_chan.permissions_for(self.role_everyone).view_channel)
+
+        incident = Incident(guild_id="12345", title="Staff Privacy Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_c", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        self.assertFalse(staff_chan.permissions_for(self.role_everyone).view_channel)
+
+        asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        self.assertFalse(staff_chan.permissions_for(self.role_everyone).view_channel)
+
+    def test_d_category_and_child_channel_inheritance_preserved(self):
+        """Test D: Category and child channel permission inheritance preserved."""
+        mgmt_category = discord.CategoryChannel(id=800, name="Management Category", guild=self.guild)
+        mgmt_category.overwrites = {
+            self.role_everyone: PermissionOverwrite(view_channel=False, send_messages=False),
+        }
+        child_chan = TextChannel(id=801, name="executive-briefs", guild=self.guild)
+        child_chan.category = mgmt_category
+        child_chan.overwrites = {}  # No explicit overwrite: inherits view_channel=False from category
+
+        self.guild.channels.extend([mgmt_category, child_chan])
+
+        # Child channel is private via category inheritance
+        self.assertFalse(child_chan.permissions_for(self.role_everyone).view_channel)
+
+        incident = Incident(guild_id="12345", title="Category Inheritance Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_d", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+
+        # Post-lockdown: child channel MUST NOT have become visible
+        self.assertFalse(child_chan.permissions_for(self.role_everyone).view_channel)
+        entry = next((e for e in record.entries if e.secondary_id == "801"), None)
+        self.assertIsNotNone(entry)
+        self.assertFalse(entry.had_overwrite)
+        self.assertEqual(entry.parent_category_id, "800")
+
+        # Recovery restores category inheritance by removing the temporary overwrite
+        asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        self.assertNotIn(self.role_everyone, child_chan.overwrites)
+        self.assertFalse(child_chan.permissions_for(self.role_everyone).view_channel)
+
+    def test_e_existing_overwrite_unrelated_bits_preserved_and_restored(self):
+        """Test E: Existing overwrite unrelated permission bits preserved and restored."""
+        chan = TextChannel(id=704, name="announcements", guild=self.guild)
+        chan.overwrites = {
+            self.role_everyone: PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                embed_links=False,
+                attach_files=False,
+                read_message_history=True,
+            ),
+        }
+        self.guild.channels.append(chan)
+
+        incident = Incident(guild_id="12345", title="Bitfield Preservation Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_e", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+
+        # During lockdown, send_messages is restricted, but unrelated embed_links=False is preserved!
+        ow_during = chan.overwrites[self.role_everyone]
+        self.assertFalse(ow_during.send_messages)
+        self.assertFalse(ow_during.embed_links)
+        self.assertTrue(ow_during.read_message_history)
+
+        asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+
+        # Post-recovery: send_messages is restored to True, and embed_links is still False
+        ow_after = chan.overwrites[self.role_everyone]
+        self.assertTrue(ow_after.send_messages)
+        self.assertFalse(ow_after.embed_links)
+        self.assertTrue(ow_after.read_message_history)
+
+    def test_f_originally_absent_overwrite_removed_on_recovery(self):
+        """Test F: Originally absent overwrite completely removed on recovery."""
+        chan = TextChannel(id=705, name="lounge", guild=self.guild)
+        chan.overwrites = {}  # Had no overwrite before lockdown
+        self.guild.channels.append(chan)
+
+        incident = Incident(guild_id="12345", title="Absent Overwrite Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_f", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        self.assertIn(self.role_everyone, chan.overwrites)
+
+        asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        # Must be removed completely
+        self.assertNotIn(self.role_everyone, chan.overwrites)
+
+    def test_g_snapshot_persistence_failure_aborts_lockdown(self):
+        """Test G: MongoDB snapshot persistence failure aborts lockdown before any mutations."""
+        class FailingJournal(LockdownJournalManager):
+            async def save_lockdown_durable(self, record: LockdownRecord) -> bool:
+                return False  # Simulate DB failure
+
+        failing_mgr = EmergencyLockdownManager(journal_manager=FailingJournal())
+
+        chan = TextChannel(id=706, name="critical-data", guild=self.guild)
+        chan.overwrites = {
+            self.role_everyone: PermissionOverwrite(send_messages=True),
+        }
+        self.guild.channels.append(chan)
+
+        incident = Incident(guild_id="12345", title="DB Fail Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_g", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(failing_mgr.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+
+        self.assertEqual(record.status, LockdownStatus.FAILED)
+        # Verify no mutations occurred!
+        self.assertTrue(chan.overwrites[self.role_everyone].send_messages)
+
+    def test_h_partial_lockdown_failure_retains_snapshot_and_records_status(self):
+        """Test H: Partial lockdown failure retains snapshot and records status."""
+        incident = Incident(guild_id="12345", title="Partial Lockdown Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_h", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        # Senior Admin was skipped due to hierarchy, so status is PARTIAL
+        self.assertEqual(record.status, LockdownStatus.PARTIAL)
+        self.assertTrue(record.summary.get("is_partial"))
+
+        # Snapshot is retained and contains SKIPPED_HIERARCHY entry
+        skipped_entries = [e for e in record.entries if e.status == JournalEntryStatus.SKIPPED_HIERARCHY]
+        self.assertGreater(len(skipped_entries), 0)
+
+    def test_i_partial_recovery_failure_leaves_unrestored_recoverable(self):
+        """Test I: Partial recovery failure leaves unrestored entries recoverable on subsequent attempt."""
+        chan1 = TextChannel(id=707, name="chan-1", guild=self.guild)
+        chan2 = TextChannel(id=708, name="chan-2", guild=self.guild)
+        chan1.overwrites = {self.role_everyone: PermissionOverwrite(send_messages=True)}
+        chan2.overwrites = {self.role_everyone: PermissionOverwrite(send_messages=True)}
+        self.guild.channels.extend([chan1, chan2])
+
+        incident = Incident(guild_id="12345", title="Recovery Retry Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_i", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+
+        # Simulate error on chan2 during first recovery attempt
+        original_set_perms = chan2.set_permissions
+        chan2.set_permissions = lambda *args, **kwargs: (_ for _ in ()).throw(discord.HTTPException(None, "500 Internal Error"))
+
+        rec1 = asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        self.assertEqual(rec1.status, LockdownStatus.PARTIAL)
+        entry2 = next(e for e in rec1.entries if e.secondary_id == "708")
+        self.assertEqual(entry2.status, JournalEntryStatus.FAILED_RESTORE)
+
+        # Restore normal operation and retry recovery
+        chan2.set_permissions = original_set_perms
+        rec2 = asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        self.assertEqual(rec2.status, LockdownStatus.RESTORED)
+        self.assertEqual(entry2.status, JournalEntryStatus.RESTORED)
+
+    def test_j_unrelated_administrator_changes_preserved_on_recovery(self):
+        """Test J: Unrelated administrator changes preserved on recovery."""
+        chan = TextChannel(id=709, name="support", guild=self.guild)
+        chan.overwrites = {self.role_everyone: PermissionOverwrite(view_channel=True, send_messages=True)}
+        self.guild.channels.append(chan)
+
+        incident = Incident(guild_id="12345", title="Admin Edit Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_j", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        self.assertFalse(chan.overwrites[self.role_everyone].send_messages)
+
+        # Admin independently enables attach_files during lockdown
+        chan.overwrites[self.role_everyone].attach_files = True
+
+        asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000", force=False))
+
+        # Sentinel restores send_messages=True, but PRESERVES the admin's attach_files=True!
+        self.assertTrue(chan.overwrites[self.role_everyone].send_messages)
+        self.assertTrue(chan.overwrites[self.role_everyone].attach_files)
+
+    def test_k_restart_recovery_uses_persisted_snapshot(self):
+        """Test K: Restart recovery uses persisted MongoDB snapshot across process reboot."""
+        chan = TextChannel(id=710, name="general-chat", guild=self.guild)
+        chan.overwrites = {self.role_everyone: PermissionOverwrite(send_messages=True)}
+        self.guild.channels.append(chan)
+
+        incident = Incident(guild_id="12345", title="Restart Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_k", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+        lockdown_id = record.lockdown_id
+
+        # Simulate complete bot restart by creating a new journal and manager with cleared in-memory state
+        fresh_journal = LockdownJournalManager()
+        fresh_journal._lockdowns.clear()
+        fresh_journal._guild_lockdowns.clear()
+        fresh_manager = EmergencyLockdownManager(journal_manager=fresh_journal)
+
+        # Verify manager hydrates from database store and successfully restores
+        rec = asyncio.run(fresh_manager.restore_lockdown(self.guild, lockdown_id, admin_user_id="1000"))
+        self.assertEqual(rec.status, LockdownStatus.RESTORED)
+        self.assertTrue(chan.overwrites[self.role_everyone].send_messages)
+
+    def test_l_channel_type_compatibility_handles_categories_voice_threads(self):
+        """Test L: Channel type compatibility handles categories, text, voice, and threads."""
+        cat = discord.CategoryChannel(id=901, name="Community", guild=self.guild)
+        tc = discord.TextChannel(id=902, name="general", guild=self.guild)
+        vc = discord.VoiceChannel(id=903, name="lounge-voice", guild=self.guild)
+        th = discord.Thread(id=904, name="discussion-thread", guild=self.guild)
+
+        cat.overwrites = {self.role_everyone: PermissionOverwrite(send_messages=True)}
+        tc.overwrites = {self.role_everyone: PermissionOverwrite(send_messages=True)}
+        vc.overwrites = {self.role_everyone: PermissionOverwrite(connect=True, speak=True)}
+        th.overwrites = {self.role_everyone: PermissionOverwrite(send_messages=True)}
+
+        self.guild.channels.extend([cat, tc, vc, th])
+
+        incident = Incident(guild_id="12345", title="Multi Type Test", severity="critical", is_emergency=True)
+        assessment = AssessmentResult(signal_id="sig_l", threat_score=90.0, severity="critical", confidence="high", should_trigger_immediate_response=True)
+        policy = SecurityResponsePolicy(guild_id="12345", shadow_mode=False, auto_lockdown_enabled=True)
+
+        record = asyncio.run(self.manager.execute_emergency_lockdown(self.guild, incident, assessment, policy))
+
+        # Check VoiceChannel has connect and speak denied
+        self.assertFalse(vc.overwrites[self.role_everyone].connect)
+        self.assertFalse(vc.overwrites[self.role_everyone].speak)
+
+        # Check TextChannel and Thread have write permissions denied
+        self.assertFalse(tc.overwrites[self.role_everyone].send_messages)
+        self.assertFalse(th.overwrites[self.role_everyone].send_messages)
+
+        # Recovery
+        asyncio.run(self.manager.restore_lockdown(self.guild, record.lockdown_id, admin_user_id="1000"))
+        self.assertTrue(vc.overwrites[self.role_everyone].connect)
+        self.assertTrue(vc.overwrites[self.role_everyone].speak)
+        self.assertTrue(tc.overwrites[self.role_everyone].send_messages)
+
 
 if __name__ == "__main__":
     unittest.main()

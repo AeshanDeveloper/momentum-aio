@@ -460,11 +460,61 @@ class utils:
 
 class PermissionOverwrite:
     def __init__(self, **kwargs):
-        self.read_messages = kwargs.get("read_messages", None)
-        self.send_messages = kwargs.get("send_messages", None)
-        self.view_channel = kwargs.get("view_channel", None)
+        self._values: Dict[str, Optional[bool]] = {}
+        for k in Permissions._FLAGS.keys():
+            self._values[k] = None
+        for k, v in kwargs.items():
+            self._values[k] = v
+            super().__setattr__(k, v)
+
+    def __getattr__(self, name: str) -> Optional[bool]:
+        if "_values" in self.__dict__ and name in self._values:
+            return self._values[name]
+        if name in Permissions._FLAGS:
+            return None
+        raise AttributeError(f"'PermissionOverwrite' object has no attribute '{name}'")
+
+    def __setattr__(self, name: str, value: Any):
+        if name == "_values":
+            super().__setattr__(name, value)
+        else:
+            if "_values" in self.__dict__ and name in Permissions._FLAGS:
+                self._values[name] = value
+            super().__setattr__(name, value)
+
+    def is_empty(self) -> bool:
+        return all(v is None for v in self._values.values())
+
+    def update(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+    def pair(self) -> Tuple[Permissions, Permissions]:
+        allow_val = 0
+        deny_val = 0
+        for k, v in self._values.items():
+            flag = Permissions._FLAGS.get(k, 0)
+            if v is True:
+                allow_val |= flag
+            elif v is False:
+                deny_val |= flag
+        return (Permissions(allow_val), Permissions(deny_val))
+
+    @classmethod
+    def from_pair(cls, allow: Permissions, deny: Permissions) -> "PermissionOverwrite":
+        ow = cls()
+        allow_val = getattr(allow, "value", 0)
+        deny_val = getattr(deny, "value", 0)
+        for k, flag in Permissions._FLAGS.items():
+            if allow_val & flag:
+                setattr(ow, k, True)
+            elif deny_val & flag:
+                setattr(ow, k, False)
+        return ow
+
+    def __iter__(self):
+        for k, v in self._values.items():
+            yield (k, v)
 
 
 class DiscordException(Exception): pass
@@ -699,6 +749,40 @@ class Channel(BaseItem):
             base_view = getattr(member_or_role.permissions, "view_channel", True)
             base_send = getattr(member_or_role.permissions, "send_messages", True)
 
+        # 1. Category overwrites inheritance
+        cat = getattr(self, "category", None)
+        if cat and hasattr(cat, "overwrites") and isinstance(cat.overwrites, dict):
+            default_role = getattr(getattr(self, "guild", None), "default_role", None)
+            if default_role and default_role in cat.overwrites:
+                cat_def_ow = cat.overwrites[default_role]
+                if getattr(cat_def_ow, "view_channel", None) is not None:
+                    base_view = cat_def_ow.view_channel
+                elif getattr(cat_def_ow, "read_messages", None) is not None:
+                    base_view = cat_def_ow.read_messages
+                if getattr(cat_def_ow, "send_messages", None) is not None:
+                    base_send = cat_def_ow.send_messages
+
+            if member_or_role in cat.overwrites and member_or_role != default_role:
+                cat_target_ow = cat.overwrites[member_or_role]
+                if getattr(cat_target_ow, "view_channel", None) is not None:
+                    base_view = cat_target_ow.view_channel
+                elif getattr(cat_target_ow, "read_messages", None) is not None:
+                    base_view = cat_target_ow.read_messages
+                if getattr(cat_target_ow, "send_messages", None) is not None:
+                    base_send = cat_target_ow.send_messages
+
+        # 2. Channel default role overwrite
+        default_role = getattr(getattr(self, "guild", None), "default_role", None)
+        if default_role and default_role in self.overwrites and member_or_role != default_role:
+            chan_def_ow = self.overwrites[default_role]
+            if getattr(chan_def_ow, "view_channel", None) is not None:
+                base_view = chan_def_ow.view_channel
+            elif getattr(chan_def_ow, "read_messages", None) is not None:
+                base_view = chan_def_ow.read_messages
+            if getattr(chan_def_ow, "send_messages", None) is not None:
+                base_send = chan_def_ow.send_messages
+
+        # 3. Direct channel overwrite
         ow = self.overwrites.get(member_or_role)
         if ow is not None:
             if getattr(ow, "view_channel", None) is not None:

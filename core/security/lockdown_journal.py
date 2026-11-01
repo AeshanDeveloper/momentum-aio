@@ -68,15 +68,39 @@ class JournalEntryStatus:
 class JournalEntry:
     """
     Atomic record of a single role or channel overwrite mutation.
+    Preserves comprehensive pre-lockdown permissions, bitfields, inheritance,
+    intended vs applied changes, and verification/restoration outcomes.
     """
     entry_id: str = field(default_factory=lambda: f"jrn_{uuid.uuid4().hex[:12]}")
     lockdown_id: str = ""
     guild_id: str = ""
+    incident_id: str = ""
     target_type: str = "role"                   # "role" or "channel_overwrite"
     target_id: str = ""                         # role ID or target ID in overwrite
     secondary_id: Optional[str] = None         # channel_id when target_type == "channel_overwrite"
     target_name: Optional[str] = None
-    
+
+    # Granular resource identification
+    resource_id: str = ""
+    resource_type: str = "role"                 # "role", "channel", "category", "voice", "thread"
+    parent_category_id: Optional[str] = None
+
+    # Lossless permission snapshots & inheritance context
+    had_overwrite: bool = True
+    original_allow_bits: int = 0
+    original_deny_bits: int = 0
+    original_overwrites: Dict[str, Any] = field(default_factory=dict)
+    inherited_context: Dict[str, Any] = field(default_factory=dict)
+    original_visibility: Dict[str, Any] = field(default_factory=dict)
+    original_writing: Dict[str, Any] = field(default_factory=dict)
+    other_permissions: Dict[str, Any] = field(default_factory=dict)
+
+    # Intended vs Applied mutation tracking
+    intended_changes: Dict[str, Any] = field(default_factory=dict)
+    applied_changes: Dict[str, Any] = field(default_factory=dict)
+    is_applied: bool = False
+    verification_result: Dict[str, Any] = field(default_factory=dict)
+
     # State tracking for strict reversibility and conflict avoidance
     before_state: Dict[str, Any] = field(default_factory=dict)
     applied_state: Dict[str, Any] = field(default_factory=dict)
@@ -84,9 +108,11 @@ class JournalEntry:
     restored_state: Optional[Dict[str, Any]] = None
     original_state: Optional[Dict[str, Any]] = None
     modified_state: Optional[Dict[str, Any]] = None
-    
+
     status: str = JournalEntryStatus.APPLIED
     error: Optional[str] = None
+    restoration_status: Optional[str] = None
+    restoration_error: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     restored_at: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -95,6 +121,11 @@ class JournalEntry:
     entity_name: Optional[str] = None
 
     def __post_init__(self):
+        if not self.resource_id:
+            self.resource_id = str(self.secondary_id or self.target_id)
+        if not self.resource_type:
+            self.resource_type = str(self.target_type)
+
         if self.entity_id and not self.target_id:
             self.target_id = str(self.entity_id)
         elif self.target_id and not self.entity_id:
@@ -119,15 +150,34 @@ class JournalEntry:
         elif self.applied_state and self.modified_state is None:
             self.modified_state = dict(self.applied_state)
 
+        if not self.intended_changes and self.applied_state:
+            self.intended_changes = dict(self.applied_state)
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "entry_id": self.entry_id,
             "lockdown_id": self.lockdown_id,
             "guild_id": str(self.guild_id),
+            "incident_id": str(self.incident_id),
             "target_type": self.target_type,
             "target_id": str(self.target_id),
             "secondary_id": str(self.secondary_id) if self.secondary_id else None,
             "target_name": self.target_name,
+            "resource_id": str(self.resource_id),
+            "resource_type": self.resource_type,
+            "parent_category_id": str(self.parent_category_id) if self.parent_category_id else None,
+            "had_overwrite": bool(self.had_overwrite),
+            "original_allow_bits": int(self.original_allow_bits),
+            "original_deny_bits": int(self.original_deny_bits),
+            "original_overwrites": self.original_overwrites,
+            "inherited_context": self.inherited_context,
+            "original_visibility": self.original_visibility,
+            "original_writing": self.original_writing,
+            "other_permissions": self.other_permissions,
+            "intended_changes": self.intended_changes,
+            "applied_changes": self.applied_changes,
+            "is_applied": bool(self.is_applied),
+            "verification_result": self.verification_result,
             "before_state": self.before_state,
             "applied_state": self.applied_state,
             "original_state": self.before_state,
@@ -136,6 +186,8 @@ class JournalEntry:
             "restored_state": self.restored_state,
             "status": self.status,
             "error": self.error,
+            "restoration_status": self.restoration_status,
+            "restoration_error": self.restoration_error,
             "created_at": self.created_at,
             "restored_at": self.restored_at,
             "metadata": self.metadata,
@@ -149,10 +201,26 @@ class JournalEntry:
             entry_id=data.get("entry_id", f"jrn_{uuid.uuid4().hex[:12]}"),
             lockdown_id=data.get("lockdown_id", ""),
             guild_id=str(data.get("guild_id", "")),
+            incident_id=str(data.get("incident_id", "")),
             target_type=data.get("target_type", "role"),
             target_id=str(data.get("target_id", "")),
             secondary_id=str(data.get("secondary_id")) if data.get("secondary_id") else None,
             target_name=data.get("target_name"),
+            resource_id=str(data.get("resource_id", data.get("secondary_id") or data.get("target_id", ""))),
+            resource_type=data.get("resource_type", data.get("target_type", "role")),
+            parent_category_id=str(data.get("parent_category_id")) if data.get("parent_category_id") else None,
+            had_overwrite=bool(data.get("had_overwrite", before.get("had_overwrite", True))),
+            original_allow_bits=int(data.get("original_allow_bits", 0)),
+            original_deny_bits=int(data.get("original_deny_bits", 0)),
+            original_overwrites=data.get("original_overwrites", {}),
+            inherited_context=data.get("inherited_context", {}),
+            original_visibility=data.get("original_visibility", {}),
+            original_writing=data.get("original_writing", {}),
+            other_permissions=data.get("other_permissions", {}),
+            intended_changes=data.get("intended_changes", {}),
+            applied_changes=data.get("applied_changes", {}),
+            is_applied=bool(data.get("is_applied", False)),
+            verification_result=data.get("verification_result", {}),
             before_state=before,
             applied_state=applied,
             original_state=before,
@@ -161,6 +229,8 @@ class JournalEntry:
             restored_state=data.get("restored_state"),
             status=data.get("status", JournalEntryStatus.APPLIED),
             error=data.get("error"),
+            restoration_status=data.get("restoration_status"),
+            restoration_error=data.get("restoration_error"),
             created_at=float(data.get("created_at", time.time())),
             restored_at=data.get("restored_at"),
             metadata=data.get("metadata", {}),
@@ -316,6 +386,93 @@ class LockdownJournalManager:
         # guild_id -> list of lockdown_ids
         self._guild_lockdowns: Dict[str, List[str]] = {}
         self._lock = threading.RLock()
+
+    async def ensure_indexes(self) -> None:
+        """
+        Creates MongoDB indexes on the security_lockdowns collection:
+        - lockdown_id (unique)
+        - compound: (guild_id, created_at)
+        - compound: (guild_id, status)
+        - incident_id
+        Supports high-concurrency multi-guild lockdowns and fast lookups.
+        """
+        try:
+            col = database.collection("security_lockdowns")
+            if hasattr(col, "create_index"):
+                res1 = col.create_index([("lockdown_id", 1)], unique=True)
+                if inspect.isawaitable(res1):
+                    await res1
+                res2 = col.create_index([("guild_id", 1), ("created_at", -1)])
+                if inspect.isawaitable(res2):
+                    await res2
+                res3 = col.create_index([("guild_id", 1), ("status", 1)])
+                if inspect.isawaitable(res3):
+                    await res3
+                res4 = col.create_index([("incident_id", 1)])
+                if inspect.isawaitable(res4):
+                    await res4
+                logger.info("[LockdownJournal] MongoDB indexes verified on security_lockdowns")
+        except Exception as err:
+            logger.debug(f"[LockdownJournal] ensure_indexes notice: {err}")
+
+    async def save_lockdown_durable(self, record: LockdownRecord) -> bool:
+        """
+        Durably persists a lockdown snapshot to MongoDB and verifies write confirmation.
+        Returns True if confirmed stored; False if persistence failed.
+        Sentinel MUST NEVER mutate permissions if this returns False!
+        """
+        # Notify standard save handler (triggers hooks/monitors and in-memory synchronization)
+        try:
+            self.save_lockdown(record)
+        except Exception as e:
+            logger.debug(f"[LockdownJournal] save_lockdown notification hook error: {e}")
+
+        try:
+            col = database.collection("security_lockdowns")
+            rec_dict = record.to_dict()
+
+            # Mock disk/memory store
+            if hasattr(col, "_get_items"):
+                items = col._get_items()
+                found = False
+                for idx, doc in enumerate(items):
+                    if doc.get("lockdown_id") == record.lockdown_id:
+                        items[idx] = rec_dict
+                        found = True
+                        break
+                if not found:
+                    items.append(rec_dict)
+                from database.database import _save_mock_data
+                _save_mock_data("security_lockdowns", items)
+
+            # Motor / MongoDB async update
+            if hasattr(col, "update_one"):
+                res = col.update_one(
+                    {"lockdown_id": record.lockdown_id},
+                    {"$set": rec_dict},
+                    upsert=True,
+                )
+                if inspect.isawaitable(res):
+                    res_val = await res
+                    if hasattr(res_val, "acknowledged") and not res_val.acknowledged:
+                        logger.error(f"[LockdownJournal] MongoDB write not acknowledged for {record.lockdown_id}")
+                        return False
+
+            # Read-after-write verification to confirm durability
+            if hasattr(col, "find_one"):
+                verify_res = col.find_one({"lockdown_id": record.lockdown_id})
+                if inspect.isawaitable(verify_res):
+                    doc = await verify_res
+                else:
+                    doc = verify_res
+                if not doc or doc.get("lockdown_id") != record.lockdown_id:
+                    logger.error(f"[LockdownJournal] Read-after-write verification failed for {record.lockdown_id}")
+                    return False
+
+            return True
+        except Exception as err:
+            logger.error(f"[LockdownJournal] CRITICAL: Durable snapshot persistence failed for {record.lockdown_id}: {err}")
+            return False
 
     def save_lockdown(self, record: LockdownRecord) -> None:
         """Saves a lockdown record in-memory and persists asynchronously to MongoDB."""

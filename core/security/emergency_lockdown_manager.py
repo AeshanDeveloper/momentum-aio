@@ -36,6 +36,7 @@ from core.security.response_policy import (
     ResponseLevel,
     LockdownStatus,
     LockdownTargetType,
+    DEFAULT_CHANNEL_DENY_PERMISSIONS,
     get_default_response_policy,
 )
 from core.security.lockdown_journal import (
@@ -66,6 +67,39 @@ DANGEROUS_PERMISSION_FLAGS: Dict[str, int] = {
     "manage_webhooks": 1 << 29,
     "mention_everyone": 1 << 17,
 }
+
+
+def overwrite_to_bitfields(ow: Optional[PermissionOverwrite]) -> Tuple[int, int, Dict[str, Optional[bool]]]:
+    """
+    Losslessly converts a Discord PermissionOverwrite to (allow_bits, deny_bits, perms_dict).
+    Handles all 41 permission flags without precision loss.
+    """
+    allow_bits = 0
+    deny_bits = 0
+    perms_dict: Dict[str, Optional[bool]] = {}
+    if ow is None:
+        return 0, 0, perms_dict
+
+    for flag_name, flag_bit in Permissions._FLAGS.items():
+        val = getattr(ow, flag_name, None)
+        perms_dict[flag_name] = val
+        if val is True:
+            allow_bits |= flag_bit
+        elif val is False:
+            deny_bits |= flag_bit
+
+    return allow_bits, deny_bits, perms_dict
+
+
+def bitfields_to_overwrite(allow_bits: int, deny_bits: int) -> PermissionOverwrite:
+    """Reconstructs a Discord PermissionOverwrite from raw allow and deny bitfields."""
+    ow = PermissionOverwrite()
+    for flag_name, flag_bit in Permissions._FLAGS.items():
+        if allow_bits & flag_bit:
+            setattr(ow, flag_name, True)
+        elif deny_bits & flag_bit:
+            setattr(ow, flag_name, False)
+    return ow
 
 
 class EmergencyLockdownManager:
@@ -210,10 +244,30 @@ class EmergencyLockdownManager:
             self._plan_role_containment(guild, bot_member, pol, is_shadow, record)
             self._plan_channel_containment(guild, bot_member, pol, is_shadow, record)
 
-            # CRITICAL: Persist snapshot to database before executing destructive/restrictive changes
+            # CRITICAL: Persist snapshot to MongoDB BEFORE executing destructive/restrictive changes
             record.checksum = record.calculate_checksum()
             record.updated_at = time.time()
-            self.journal.save_lockdown(record)
+            record.status = LockdownStatus.ATTEMPTED
+
+            persisted = await self.journal.save_lockdown_durable(record)
+            if not persisted:
+                logger.critical(
+                    f"[EmergencyLockdown] Snapshot persistence FAILED for lockdown {record.lockdown_id} (Guild {gid}). "
+                    f"Aborting lockdown immediately without modifying any permissions."
+                )
+                record.status = LockdownStatus.FAILED
+                record.metadata["failure_reason"] = "Database snapshot persistence failed prior to execution"
+                return record
+
+            # Validate verification check
+            persisted_rec = self.journal.get_lockdown(record.lockdown_id)
+            if not persisted_rec:
+                logger.critical(
+                    f"[EmergencyLockdown] Snapshot verification check failed for {record.lockdown_id}. Aborting."
+                )
+                record.status = LockdownStatus.FAILED
+                record.metadata["failure_reason"] = "Snapshot verification check failed"
+                return record
 
             # Step A: Apply Selective Role Dangerous Permission Stripping
             if progress_callback:
@@ -247,10 +301,10 @@ class EmergencyLockdownManager:
             else:
                 record.status = LockdownStatus.ACTIVE
 
-            # Calculate baseline checksum
+            # Calculate baseline checksum and persist final state
             record.checksum = record.calculate_checksum()
             record.updated_at = time.time()
-            self.journal.save_lockdown(record)
+            await self.journal.save_lockdown_durable(record)
 
             if progress_callback:
                 try:
@@ -384,11 +438,14 @@ class EmergencyLockdownManager:
         is_shadow: bool,
         record: LockdownRecord,
     ) -> None:
-        """Plans channel and category containment entries and captures pre-lockdown overwrites."""
+        """
+        Plans channel and category containment entries and captures pre-lockdown overwrites with lossless bitfields.
+        CRITICAL: Never modifies visibility (ViewChannel) to restrict writing.
+        Private channels (owner, staff, logging, ticket) remain private during and after lockdown.
+        """
         if not guild:
             return
 
-        # Support both channels and categories
         targets = []
         seen_ids = set()
         for cat in getattr(guild, "categories", []):
@@ -411,30 +468,142 @@ class EmergencyLockdownManager:
             if cid_str in exempt_channels:
                 continue
 
+            # Identify channel type
+            is_cat = getattr(ch, "type", None) == 4 or hasattr(ch, "channels") or isinstance(ch, getattr(discord, "CategoryChannel", ()))
+            is_voice = getattr(ch, "type", None) in (2, 13) or isinstance(ch, getattr(discord, "VoiceChannel", ())) or isinstance(ch, getattr(discord, "StageChannel", ()))
+            is_thread = getattr(ch, "type", None) in (10, 11, 12) or isinstance(ch, getattr(discord, "Thread", ()))
+
+            ch_type = "category" if is_cat else ("voice" if is_voice else ("thread" if is_thread else "text"))
+
             overwrites = getattr(ch, "overwrites", {})
             current_ow = overwrites.get(default_role)
             had_overwrite = (current_ow is not None)
 
-            before_dict = {"had_overwrite": had_overwrite}
+            # Compute lossless bitfields and 41-flag dictionary
+            orig_allow_bits, orig_deny_bits, orig_perms = overwrite_to_bitfields(current_ow)
+
+            # Evaluate effective pre-lockdown visibility for @everyone
+            parent_cat = getattr(ch, "category", None)
+            parent_cat_id = str(parent_cat.id) if parent_cat else None
+            inherited_view = None
+            if parent_cat and hasattr(parent_cat, "overwrites") and default_role in parent_cat.overwrites:
+                inherited_view = getattr(parent_cat.overwrites[default_role], "view_channel", None)
+
+            eff_perms = ch.permissions_for(default_role) if hasattr(ch, "permissions_for") else Permissions()
+            effective_view = bool(getattr(eff_perms, "view_channel", True))
+
+            # Channel is private if effective view is False OR if its overwrite explicitly denies view_channel
+            is_private = (not effective_view) or (getattr(current_ow, "view_channel", None) is False) or (getattr(current_ow, "read_messages", None) is False)
+
+            # Capture visibility, writing, and other permissions
+            orig_visibility = {
+                "view_channel": getattr(current_ow, "view_channel", None) if current_ow else None,
+                "read_messages": getattr(current_ow, "read_messages", None) if current_ow else None,
+                "effective_view": effective_view,
+                "is_private": is_private,
+            }
+            orig_writing = {
+                k: getattr(current_ow, k, None) if current_ow else None
+                for k in [
+                    "send_messages",
+                    "send_messages_in_threads",
+                    "create_public_threads",
+                    "create_private_threads",
+                    "add_reactions",
+                    "connect",
+                    "speak",
+                ]
+            }
+            other_permissions = {
+                k: v for k, v in orig_perms.items()
+                if k not in (
+                    "view_channel", "read_messages", "send_messages",
+                    "send_messages_in_threads", "create_public_threads",
+                    "create_private_threads", "add_reactions", "connect", "speak"
+                ) and v is not None
+            }
+
+            # Selectively determine permissions to deny based on channel type and policy
+            # NEVER include view_channel or read_messages in write restrictions!
+            candidate_deny = [p for p in policy.channel_deny_permissions if p not in ("view_channel", "read_messages")]
+
+            intended_deny: Dict[str, bool] = {}
+            if is_cat:
+                for p in ["send_messages", "send_messages_in_threads", "create_public_threads", "create_private_threads"]:
+                    if p in candidate_deny or p in DEFAULT_CHANNEL_DENY_PERMISSIONS:
+                        intended_deny[p] = False
+            elif is_voice:
+                for p in ["connect", "speak"]:
+                    intended_deny[p] = False
+                if "send_messages" in candidate_deny:
+                    intended_deny["send_messages"] = False
+            elif is_thread:
+                for p in ["send_messages", "send_messages_in_threads"]:
+                    intended_deny[p] = False
+            else:
+                for p in candidate_deny:
+                    intended_deny[p] = False
+
+            # CRITICAL SECURITY RULE:
+            # If the channel is private, the applied overwrite MUST explicitly preserve view_channel=False
+            # so that creating a channel overwrite does not shadow a private category or expose the channel!
+            # If the channel is NOT private, view_channel remains unchanged.
+            if is_private:
+                intended_deny["view_channel"] = False
+            elif current_ow and getattr(current_ow, "view_channel", None) is not None:
+                intended_deny["view_channel"] = getattr(current_ow, "view_channel")
+
+            before_dict = {
+                "had_overwrite": had_overwrite,
+                "permissions": orig_perms,
+                "allow_bits": orig_allow_bits,
+                "deny_bits": orig_deny_bits,
+                "effective_view": effective_view,
+                "is_private": is_private,
+                "parent_category_id": parent_cat_id,
+            }
             if current_ow:
-                for perm_name in policy.channel_deny_permissions:
-                    before_dict[perm_name] = getattr(current_ow, perm_name, None)
+                for k, v in orig_perms.items():
+                    if v is not None:
+                        before_dict[k] = v
 
-            applied_dict = {perm_name: False for perm_name in policy.channel_deny_permissions}
-
-            ch_type = "category" if getattr(ch, "type", None) == 4 or hasattr(ch, "channels") else "channel"
+            applied_dict = dict(intended_deny)
 
             entry = JournalEntry(
                 lockdown_id=record.lockdown_id,
                 guild_id=record.guild_id,
+                incident_id=record.incident_id,
                 target_type="channel_overwrite",
                 target_id=str(default_role.id),
                 secondary_id=cid_str,
                 target_name=f"{ch_type.capitalize()}:{getattr(ch, 'name', cid_str)}",
+                resource_id=cid_str,
+                resource_type=ch_type,
+                parent_category_id=parent_cat_id,
+                had_overwrite=had_overwrite,
+                original_allow_bits=orig_allow_bits,
+                original_deny_bits=orig_deny_bits,
+                original_overwrites=orig_perms,
+                inherited_context={
+                    "parent_category_id": parent_cat_id,
+                    "inherited_view": inherited_view,
+                    "is_private": is_private,
+                },
+                original_visibility=orig_visibility,
+                original_writing=orig_writing,
+                other_permissions=other_permissions,
+                intended_changes=dict(intended_deny),
+                applied_changes={},
+                is_applied=False,
                 before_state=before_dict,
                 applied_state=applied_dict,
                 status=JournalEntryStatus.CAPTURED,
-                metadata={"channel_type": str(getattr(ch, "type", "text"))},
+                metadata={
+                    "channel_type": str(getattr(ch, "type", "text")),
+                    "channel_name": getattr(ch, "name", ""),
+                    "effective_view_before": effective_view,
+                    "is_private": is_private,
+                },
             )
             record.entries.append(entry)
 
@@ -547,13 +716,12 @@ class EmergencyLockdownManager:
                     new_ow = PermissionOverwrite()
                     if current_ow:
                         for k, v in getattr(current_ow, "__dict__", {}).items():
-                            setattr(new_ow, k, v)
-                    is_voice = getattr(ch, "type", None) == 2 or isinstance(ch, getattr(discord, "VoiceChannel", ()))
-                    deny_perms = list(policy.channel_deny_permissions)
-                    if is_voice:
-                        deny_perms.extend(["connect", "speak"])
-                    for perm_name in deny_perms:
-                        setattr(new_ow, perm_name, False)
+                            if not k.startswith("_"):
+                                setattr(new_ow, k, v)
+
+                    # Apply planned containment mutations exactly as calculated in entry.applied_state
+                    for perm_name, perm_val in entry.applied_state.items():
+                        setattr(new_ow, perm_name, perm_val)
 
                     if hasattr(ch, "set_permissions"):
                         await ch.set_permissions(
@@ -570,6 +738,29 @@ class EmergencyLockdownManager:
                         )
                     if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
                         ch.overwrites[default_role] = new_ow
+
+                    # Post-mutation verification
+                    eff_perms = ch.permissions_for(default_role) if hasattr(ch, "permissions_for") else Permissions()
+                    was_private = entry.original_visibility.get("is_private", False)
+                    is_viewable = bool(getattr(eff_perms, "view_channel", True))
+
+                    if was_private and is_viewable:
+                        logger.critical(
+                            f"[EmergencyLockdown] VIOLATION PREVENTED: Channel {getattr(ch, 'name', cid)} became viewable! Forcing view_channel=False."
+                        )
+                        setattr(new_ow, "view_channel", False)
+                        if hasattr(ch, "set_permissions"):
+                            await ch.set_permissions(default_role, overwrite=new_ow)
+                        if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
+                            ch.overwrites[default_role] = new_ow
+
+                    entry.verification_result = {
+                        "verified": True,
+                        "effective_view_after": not was_private,
+                        "visibility_preserved": (was_private and not is_viewable) or (not was_private and is_viewable),
+                    }
+                    entry.is_applied = True
+                    entry.applied_changes = dict(entry.applied_state)
                     entry.status = JournalEntryStatus.VERIFIED
                 except Exception as err:
                     entry.status = JournalEntryStatus.FAILED_API
@@ -675,7 +866,7 @@ class EmergencyLockdownManager:
             record.restored_at = time.time()
             record.restored_by = str(admin_user_id)
             record.updated_at = time.time()
-            self.journal.save_lockdown(record)
+            await self.journal.save_lockdown_durable(record)
 
             if progress_callback:
                 try:
@@ -802,58 +993,80 @@ class EmergencyLockdownManager:
             if not had_ow_initially and current_ow is None:
                 has_conflict = False
             elif current_ow is not None:
-                matches_before = True
-                for k, before_v in entry.before_state.items():
-                    if k not in ("had_overwrite", "channel_type", "name"):
-                        if getattr(current_ow, k, None) != before_v:
-                            matches_before = False
-                            break
-                if not matches_before:
-                    for k, applied_v in entry.applied_state.items():
-                        cur_v = current_dict.get(k)
-                        if cur_v != applied_v:
-                            has_conflict = True
-                            break
+                for k, applied_v in entry.applied_state.items():
+                    if k in ("view_channel", "read_messages") and entry.original_visibility.get("is_private"):
+                        continue
+                    cur_v = current_dict.get(k)
+                    before_v = entry.before_state.get(k)
+                    if cur_v != applied_v and cur_v != before_v:
+                        has_conflict = True
+                        break
             if has_conflict:
                 logger.warning(
                     f"[EmergencyLockdown] Conflict detected for channel overwrite on {getattr(ch, 'name', cid)}. Preserving admin changes."
                 )
+                entry.restoration_status = "conflict_detected"
                 return JournalEntryStatus.CONFLICT_DETECTED, "Independent admin changes detected on channel overwrite"
 
         entry.restored_state = entry.before_state
 
         if is_shadow:
+            entry.restoration_status = "restored"
+            entry.status = JournalEntryStatus.RESTORED
             return JournalEntryStatus.RESTORED, None
 
         had_overwrite = entry.before_state.get("had_overwrite", True)
 
         try:
             if not had_overwrite:
-                # Channel originally had NO overwrite for default_role: clear overwrite completely!
-                if hasattr(ch, "set_permissions"):
-                    await ch.set_permissions(
-                        target_obj,
-                        overwrite=None,
-                        reason=f"Sentinel Recovery: Cleared lockdown overwrite for {entry.lockdown_id}",
-                    )
-                elif hasattr(ch, "edit"):
-                    cur_ows = dict(getattr(ch, "overwrites", {}))
-                    cur_ows.pop(target_obj, None)
-                    await ch.edit(
-                        overwrites=cur_ows,
-                        reason=f"Sentinel Recovery: Cleared lockdown overwrite for {entry.lockdown_id}",
-                    )
-                if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
-                    ch.overwrites.pop(target_obj, None)
-            else:
-                # Channel originally had an overwrite: restore original settings into a fresh object
+                # Check if admin added unrelated permissions during lockdown
+                unrelated_added = False
                 new_ow = PermissionOverwrite()
                 if current_ow:
                     for k, v in getattr(current_ow, "__dict__", {}).items():
-                        setattr(new_ow, k, v)
-                for k, before_v in entry.before_state.items():
-                    if k not in ("had_overwrite", "channel_type", "name"):
-                        setattr(new_ow, k, before_v)
+                        if k not in entry.applied_state and v is not None and not k.startswith("_"):
+                            setattr(new_ow, k, v)
+                            unrelated_added = True
+
+                if not unrelated_added or new_ow.is_empty():
+                    # Channel originally had NO overwrite for default_role: clear overwrite completely!
+                    if hasattr(ch, "set_permissions"):
+                        await ch.set_permissions(
+                            target_obj,
+                            overwrite=None,
+                            reason=f"Sentinel Recovery: Cleared lockdown overwrite for {entry.lockdown_id}",
+                        )
+                    elif hasattr(ch, "edit"):
+                        cur_ows = dict(getattr(ch, "overwrites", {}))
+                        cur_ows.pop(target_obj, None)
+                        await ch.edit(
+                            overwrites=cur_ows,
+                            reason=f"Sentinel Recovery: Cleared lockdown overwrite for {entry.lockdown_id}",
+                        )
+                    if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
+                        ch.overwrites.pop(target_obj, None)
+                else:
+                    # Admin added unrelated permissions: keep admin's permissions while clearing Sentinel's denials
+                    if hasattr(ch, "set_permissions"):
+                        await ch.set_permissions(
+                            target_obj,
+                            overwrite=new_ow,
+                            reason=f"Sentinel Recovery: Preserved admin permissions while clearing lockdown for {entry.lockdown_id}",
+                        )
+                    if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
+                        ch.overwrites[target_obj] = new_ow
+            else:
+                # Channel originally had an overwrite: start from current_ow to preserve any unrelated changes by admin
+                new_ow = PermissionOverwrite()
+                if current_ow:
+                    for k, v in getattr(current_ow, "__dict__", {}).items():
+                        if not k.startswith("_"):
+                            setattr(new_ow, k, v)
+
+                # Restore original values for the keys Sentinel altered
+                for k in entry.applied_state.keys():
+                    orig_v = entry.original_overwrites.get(k) if entry.original_overwrites else entry.before_state.get(k)
+                    setattr(new_ow, k, orig_v)
 
                 if hasattr(ch, "set_permissions"):
                     await ch.set_permissions(
@@ -870,9 +1083,17 @@ class EmergencyLockdownManager:
                     )
                 if hasattr(ch, "overwrites") and isinstance(ch.overwrites, dict):
                     ch.overwrites[target_obj] = new_ow
+
+            entry.status = JournalEntryStatus.RESTORED
+            entry.restoration_status = "restored"
+            entry.restoration_error = None
+            entry.restored_at = time.time()
             return JournalEntryStatus.RESTORED, None
         except Exception as err:
             logger.error(f"[EmergencyLockdown] Failed to restore channel overwrite on {getattr(ch, 'name', cid)}: {err}")
+            entry.status = JournalEntryStatus.FAILED_RESTORE
+            entry.restoration_status = "failed_restore"
+            entry.restoration_error = str(err)
             return JournalEntryStatus.FAILED_RESTORE, str(err)
 
     # Diagnostic & Posture Auditing

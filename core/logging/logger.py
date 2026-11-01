@@ -26,4 +26,7 @@ class Logger:
     def error(self, *args: Any, **kwargs: Any) -> None:
         print(self._fmt("ERROR", "31", *args), file=sys.stderr, flush=True)
 
+    def critical(self, *args: Any, **kwargs: Any) -> None:
+        print(self._fmt("CRIT", "31;1", *args), file=sys.stderr, flush=True)
+
 logger = Logger()

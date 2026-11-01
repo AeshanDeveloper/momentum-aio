@@ -216,6 +216,24 @@ class MockCollection:
         filter_dict = filter_dict or {}
         return sum(1 for item in self._get_items() if _matches_filter(item, filter_dict))
 
+    async def create_index(self, keys: Any, **kwargs: Any) -> str:
+        idx_name = kwargs.get("name") or (str(keys) if not isinstance(keys, list) else "_".join(f"{k}_{d}" for k, d in keys))
+        if not hasattr(self, "_indexes"):
+            self._indexes = []
+        self._indexes.append({"keys": keys, "kwargs": kwargs, "name": idx_name})
+        return idx_name
+
+    async def create_indexes(self, indexes: List[Any]) -> List[str]:
+        res = []
+        for idx in indexes:
+            if hasattr(idx, "document"):
+                res.append(await self.create_index(idx.document))
+            elif isinstance(idx, tuple):
+                res.append(await self.create_index([idx]))
+            else:
+                res.append(await self.create_index(idx))
+        return res
+
 class DatabaseManager:
     """
     Unified Database Manager. Supports MongoDB via Motor with automated
