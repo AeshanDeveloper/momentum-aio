@@ -197,7 +197,12 @@ class SecurityProtectionService:
                     try:
                         loop = asyncio.get_running_loop()
                         if loop.is_running():
-                            loop.create_task(res)
+                            async def _persist_policy(fut=res, guild_id=gid):
+                                try:
+                                    await fut
+                                except Exception as err_p:
+                                    logger.debug(f"[ProtectionService] Background policy persist error for {guild_id}: {err_p}")
+                            loop.create_task(_persist_policy())
                     except RuntimeError:
                         pass
             logger.info(f"[ProtectionService] Saved policy for guild {gid} (Auto-lockdown: {policy.auto_lockdown_enabled})")

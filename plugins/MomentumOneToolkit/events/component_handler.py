@@ -5,7 +5,7 @@ import discord
 from core.logging.logger import logger
 from plugins.MomentumOneToolkit.tickets.manager import TicketManager
 from sdk.discord import send_ui
-from config.settings import settings, COLORS, EMOJIS
+from config.settings import settings, COLORS, EMOJIS, get_color, get_emoji
 from config.strings import get_string
 from core.security.antinuke import AntiNukeManager, AntiNukeConstants, get_default_thresholds, get_default_punishments
 from apps.bot.discord.permissions.resolver import is_bot_owner
@@ -16,6 +16,7 @@ from sdk.discord.builders import (
     ButtonStyle,
     SeparatorSpacingSize,
 )
+from plugins.MomentumOneToolkit.commands.security.explain import build_explain_view
 
 name = "interactionComponent"
 description = "Comprehensive button and select menu component dispatcher for MomentumOne"
@@ -1846,7 +1847,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                     from plugins.MomentumOneToolkit.commands.security.whitelist import build_whitelist_dashboard_view
                     v = await build_whitelist_dashboard_view(guild)
                 elif target == "explain":
-                    v = build_explain_container()
+                    v = build_explain_view()
                 else:
                     v = await build_security_hub_view(guild)
 
@@ -1868,7 +1869,7 @@ async def execute(ctx: Any, interaction: discord.Interaction):
                 await _handle_trigger(interaction, guild, interaction.user, "Emergency lockdown requested from Security Suite", force=False)
 
             elif action == "explain":
-                v = build_explain_container()
+                v = build_explain_view()
                 if hasattr(interaction, "response") and not interaction.response.is_done():
                     await interaction.response.edit_message(view=v)
             return
@@ -1881,8 +1882,6 @@ async def execute(ctx: Any, interaction: discord.Interaction):
         # ----------------------------------------------------------------------
         if custom_id.startswith("mod_confirm:") or custom_id.startswith("mod_cancel:"):
             from core.security.rate_limiter import sentinel_rate_limiter
-            from sdk.discord.builders import ContainerBuilder, SeparatorSpacingSize
-            from config.settings import get_color, get_emoji
 
             parts = custom_id.split(":")
             is_confirm = custom_id.startswith("mod_confirm:")

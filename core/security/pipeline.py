@@ -525,6 +525,32 @@ class SentinelSecurityPipeline:
             "processed_events_total": self._processed_event_count,
         }
 
+    def get_incident_intelligence_diagnostics(self, guild_id: Optional[str] = None) -> Dict[str, Any]:
+        """Provides diagnostic metrics on active incidents and alert delivery/coalescing."""
+        gid = str(guild_id) if guild_id else None
+        active_incidents = []
+        if self.incident_manager:
+            if gid:
+                incs = self.incident_manager.get_active_incidents(gid)
+            else:
+                incs = self.incident_manager.get_all_active_incidents() if hasattr(self.incident_manager, "get_all_active_incidents") else []
+            active_incidents = [inc.to_dict() if hasattr(inc, "to_dict") else inc for inc in incs]
+
+        delivery_metrics = {
+            "total_primary_alerts_sent": getattr(self.alert_delivery, "total_primary_alerts_sent", 0),
+            "total_edits_executed": getattr(self.alert_delivery, "total_edits_executed", 0),
+            "total_edits_coalesced": getattr(self.alert_delivery, "total_edits_coalesced", 0),
+            "total_edits_suppressed": getattr(self.alert_delivery, "total_edits_suppressed", 0),
+            "total_recreations_on_404": getattr(self.alert_delivery, "total_recreations_on_404", 0),
+            "total_resolution_updates": getattr(self.alert_delivery, "total_resolution_updates", 0),
+        }
+
+        return {
+            "active_incidents": active_incidents,
+            "delivery_metrics": delivery_metrics,
+        }
+
+
 
 # Global singleton
 sentinel_pipeline = SentinelSecurityPipeline.get_instance()

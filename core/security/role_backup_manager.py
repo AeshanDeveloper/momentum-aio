@@ -175,7 +175,12 @@ class RoleBackupManager:
                         try:
                             loop = asyncio.get_running_loop()
                             if loop.is_running():
-                                loop.create_task(res)
+                                async def _persist_task(fut=res, role_id=rid):
+                                    try:
+                                        await fut
+                                    except Exception as persist_err:
+                                        logger.debug(f"[RoleBackupManager] Background persist error for role {role_id}: {persist_err}")
+                                loop.create_task(_persist_task())
                         except RuntimeError:
                             pass
             except Exception as err:
